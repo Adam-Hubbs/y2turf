@@ -1,0 +1,13 @@
+Package: y2turf
+Title: Efficient Algorithms for TURF Analysis
+Version: 0.0.0.9000
+Authors@R: 
+    person("Adam", "Hubbs", , "adam@y2analytics.com", role = c("aut", "cre"))
+Description: Efficient Algorithms for TURF Analysis
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.1.0
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
