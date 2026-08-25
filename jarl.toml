@@ -1,0 +1,4 @@
+[lint]
+extend-select = ["TESTTHAT"]
+[lint.undesirable_function]
+extend-functions = ["ifelse", "suppressWarnings", "suppressMessages"]
