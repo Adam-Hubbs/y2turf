@@ -26,11 +26,18 @@ turf <- function(
   swap_top_n = 3
 ) {
   validate_turf_args(
+    df,
     possible_products,
     num_products,
+    batch_size,
     keep_n_at_batch,
-    num_return
+    num_return,
+    show_combinations,
+    use_swaps,
+    swap_top_n
   )
+
+  product_order <- determine_product_order(df, possible_products)
 
   batch_sizes <- determine_batch_sizes(
     length(possible_products),
@@ -43,48 +50,81 @@ turf <- function(
   fixed <- character(0)
   fixed_before_final_batch <- character(0)
   final_batch_result <- NULL
+  final_swap_result <- NULL
   regular_combinations_searched <- 0
   swap_combinations_searched <- 0
 
   for (i in seq_along(batch_sizes)) {
     size <- batch_sizes[i]
+    is_final_batch <- i == length(batch_sizes)
+    keep_n_at_this_batch <- if (is_final_batch) {
+      max(keep_n_at_batch, num_return)
+    } else {
+      keep_n_at_batch
+    }
     final_batch_result <- run_batch(
       df,
       possible_products,
       size,
       fixed = if (length(fixed) == 0) NA else fixed,
-      keep_n = keep_n_at_batch
+      keep_n = keep_n_at_this_batch
     )
     regular_combinations_searched <- regular_combinations_searched +
       final_batch_result$n_combinations
 
     fixed_before_final_batch <- fixed
+    final_swap_result <- NULL
+
     if (use_swaps && i > 1) {
+      # On the final batch, the swap step's own result *is* the output --
+      # not just a seed for the next batch -- so widen its `top_n` to cover
+      # `num_return` distinct combinations rather than just `swap_top_n`.
       swap_result <- swap_until_stable(
         df,
         final_batch_result$combos,
         fixed,
         possible_products,
-        top_n = swap_top_n,
-        starting_n = keep_n_at_batch
+        product_order,
+        top_n = if (is_final_batch) max(swap_top_n, num_return) else swap_top_n,
+        starting_n = keep_n_at_this_batch
       )
-      fixed <- swap_result$combos[, 1]
       swap_combinations_searched <- swap_combinations_searched +
         swap_result$n_combinations
+
+      if (is_final_batch) {
+        final_swap_result <- swap_result
+      } else {
+        fixed <- swap_result$combos[, 1]
+      }
     } else {
       fixed <- c(fixed, final_batch_result$combos[, 1])
     }
   }
 
-  warn_if_insufficient_combos(ncol(final_batch_result$combos), num_return)
-
-  result <- collect_top_combos(
-    df,
-    possible_products,
-    fixed_before_final_batch,
-    final_batch_result,
+  warn_if_insufficient_combos(
+    if (is.null(final_swap_result)) {
+      ncol(final_batch_result$combos)
+    } else {
+      ncol(final_swap_result$combos)
+    },
     num_return
   )
+
+  result <- if (is.null(final_swap_result)) {
+    collect_top_combos(
+      df,
+      fixed_before_final_batch,
+      final_batch_result,
+      num_return,
+      product_order
+    )
+  } else {
+    combos_list <- purrr::map(
+      seq_len(ncol(final_swap_result$combos)),
+      \(i) final_swap_result$combos[, i]
+    )
+    rank_combos(df, combos_list, num_return, product_order)
+  }
 
   if (show_combinations) {
     total_combinations_searched <- regular_combinations_searched +
@@ -147,17 +187,16 @@ run_batch <- function(df, possible_products, size, fixed = NA, keep_n = 20) {
 all_candidate_combinations <- function(possible_products, size) {
   n <- length(possible_products)
   if (size > n) {
-    stop("`size` cannot exceed the number of possible products.")
+    cli::cli_abort(
+      "{.arg size} {.val {size}} cannot exceed the number of possible products {.val {n}}."
+    )
   }
 
   n_combos <- choose(n, size)
   if (n_combos > 2e8) {
-    warning(sprintf(
-      "Requested %.0f combinations (n = %d, size = %d); this may exhaust memory/time.",
-      n_combos,
-      n,
-      size
-    ))
+    cli::cli_warn(
+      "Requested {.val {n_combos}} combinations (n = {n}, size = {size}); this may exhaust memory/time."
+    )
   }
 
   rows <- vector("list", size)

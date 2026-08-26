@@ -5,3 +5,4 @@
 ^[.]?jarl[.]toml$
 ^\.vscode$
 ^\.github$
+^data-raw$

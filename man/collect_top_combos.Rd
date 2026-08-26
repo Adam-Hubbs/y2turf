@@ -6,22 +6,22 @@
 \usage{
 collect_top_combos(
   df,
-  possible_products,
   fixed_before_final_batch,
   final_batch_result,
-  num_return
+  num_return,
+  product_order
 )
 }
 \arguments{
 \item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
-
-\item{possible_products}{The universe of possible products we are testing. Given as a character vector.}
 
 \item{fixed_before_final_batch}{The combination that was fixed before the final batch. Used for optimizing the sorting since we know this is in a good order already.}
 
 \item{final_batch_result}{A vector of the activations for the combinations that were fixed before the final batch.}
 
 \item{num_return}{The n-best solutions to return from turf(). A positive integer.}
+
+\item{product_order}{The canonical product ordering from \code{\link[=determine_product_order]{determine_product_order()}}.}
 }
 \value{
 The sorted result of turf()

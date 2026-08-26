@@ -20,20 +20,36 @@ swap_until_stable <- function(
   combs,
   fixed,
   possible_products,
+  product_order,
   top_n = 3,
   starting_n = 20,
   max_rounds = 50
 ) {
-  starting_combos <- canonicalize_combos(
-    df,
+  starting_combos <- apply(
     prepare_full_candidates(combs, fixed),
-    possible_products
+    2,
+    sort_products,
+    product_order = product_order
   )
+
+  # Every product is already part of the combination, so there is nothing
+  # left to swap in -- skip straight to picking the best `top_n`.
+  if (nrow(starting_combos) >= length(possible_products)) {
+    return(c(
+      top_n_combinations(df, starting_combos, top_n),
+      list(n_combinations = 0)
+    ))
+  }
+
   current <- top_n_combinations(df, starting_combos, starting_n)
   n_combinations <- 0
 
   for (round in seq_len(max_rounds)) {
-    potential_swaps <- do_swaps(df, current$combos, possible_products)
+    potential_swaps <- do_swaps(
+      current$combos,
+      possible_products,
+      product_order
+    )
     n_combinations <- n_combinations + ncol(potential_swaps)
     candidates <- cbind(current$combos, potential_swaps)
     candidates <- candidates[, !duplicated(t(candidates)), drop = FALSE]
@@ -56,11 +72,12 @@ swap_until_stable <- function(
 #'
 #' Creates all potential swaps we need to check from the given candidate_matrix.
 #'
-#' @inheritParams turf df possible_products
+#' @inheritParams turf possible_products
 #' @param candidate_matrix A matrix with the candidate combinations for this stage.
+#' @param product_order The canonical product ordering from [determine_product_order()].
 #'
 #' @return A new matrix with all the potential swaps we need to check (de-duplicated).
-do_swaps <- function(df, candidate_matrix, possible_products) {
+do_swaps <- function(candidate_matrix, possible_products, product_order) {
   potential_swaps <- candidate_matrix |>
     apply(
       2,
@@ -70,7 +87,12 @@ do_swaps <- function(df, candidate_matrix, possible_products) {
     ) |>
     (\(mats) do.call(cbind, mats))()
 
-  ordered_swaps <- canonicalize_combos(df, potential_swaps, possible_products)
+  ordered_swaps <- apply(
+    potential_swaps,
+    2,
+    sort_products,
+    product_order = product_order
+  )
   ordered_swaps[, !duplicated(t(ordered_swaps)), drop = FALSE]
 }
 
@@ -86,7 +108,7 @@ find_swaps <- function(single_combination, full_product_list) {
   m <- length(swappers)
 
   if (m == 0) {
-    return(matrix(single_combination, nrow = k, ncol = 0))
+    return(matrix(character(0), nrow = k, ncol = 0))
   }
 
   # k*m columns total: m swap-variants for each of the k positions

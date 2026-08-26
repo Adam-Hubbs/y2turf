@@ -4,14 +4,14 @@
 \alias{do_swaps}
 \title{Create matrix of potential swaps}
 \usage{
-do_swaps(df, candidate_matrix, possible_products)
+do_swaps(candidate_matrix, possible_products, product_order)
 }
 \arguments{
-\item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
-
 \item{candidate_matrix}{A matrix with the candidate combinations for this stage.}
 
 \item{possible_products}{The universe of possible products we are testing. Given as a character vector.}
+
+\item{product_order}{The canonical product ordering from \code{\link[=determine_product_order]{determine_product_order()}}.}
 }
 \value{
 A new matrix with all the potential swaps we need to check (de-duplicated).
