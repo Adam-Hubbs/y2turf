@@ -6,6 +6,14 @@
 \usage{
 product_sort_order(products, solo_counts, possible_products)
 }
+\arguments{
+\item{products}{A character vector of products to sort}
+
+\item{solo_counts}{The reach of each product to sort}
+
+\item{possible_products}{The universe of total possible products.}
+}
 \description{
-Returns the canonical ordering
+Returns the canonical ordering of the products by individual reach.
+Ties are broken by the order in which they were passed to \code{\link[=turf]{turf()}}.
 }

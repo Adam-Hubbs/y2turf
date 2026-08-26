@@ -7,7 +7,7 @@
 combo_frequency(df, products)
 }
 \arguments{
-\item{df}{The activation dataframe}
+\item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
 
 \item{products}{A Character vector of product names that correspond to column names in the activation dataframe}
 }

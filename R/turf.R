@@ -1,3 +1,19 @@
+#' Run a TURF analysis
+#'
+#' Runs a TURF analysis with an efficient algorithm that only checks combinations that are plausibly correct.
+#'
+#' @param df The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.
+#' @param possible_products The universe of possible products we are testing. Given as a character vector.
+#' @param num_products The number of products to be included in our competetive set. A positive integer.
+#' @param batch_size The number of products to solve for at a given time. A positive integer. Note: We may override this in order to make sure we hit num_return.
+#' @param keep_n_at_batch The number of solutions from each batch that we do the swapping step on. A positive integer.
+#' @param num_return The n-best solutions to return from turf(). A positive integer.
+#' @param show_combinations Whether to show the number of combinations searched or not. A boolean.
+#' @param use_swaps Whether to augment the main algorithm with swapping after each batch_size. A boolean.
+#' @param swap_top_n The number of combinations the swap algorithm continues each step on until they no longer change. A positive integer.
+#'
+#' @return A dataframe with the combinations and corresponding reach
+#' @export
 turf <- function(
   df,
   possible_products,
@@ -42,18 +58,6 @@ turf <- function(
     regular_combinations_searched <- regular_combinations_searched +
       final_batch_result$n_combinations
 
-    # Refine this batch's `keep_n_at_batch` candidates by swapping one
-    # product at a time -- anywhere in the combination, not just the
-    # products this batch added -- until the top few stop changing, then
-    # carry the single best forward as the new `fixed`. On the last
-    # iteration this carry-forward is unused -- `fixed_before_final_batch`
-    # (captured just before it) is what matters. `use_swaps = FALSE` skips
-    # this refinement and just carries the batch's top candidate forward,
-    # as before swapping was introduced. The very first batch is also
-    # skipped even when `use_swaps = TRUE`: with no products fixed yet,
-    # `run_batch()` has already exhaustively searched every combination of
-    # this size, so every "swap" of one of its top candidates is a
-    # combination that was already scored -- there's nothing new to find.
     fixed_before_final_batch <- fixed
     if (use_swaps && i > 1) {
       swap_result <- swap_until_stable(
@@ -96,7 +100,16 @@ turf <- function(
   result
 }
 
-
+#' Run a the turf algorithm for a batch
+#'
+#' @inheritParams turf df possible_products
+#' @param size The size of the batch (Number of additional products to determine order for)
+#' @param fixed A character vecor of products who have already been found in a previous batch
+#' @param keep_n The number of top combinations to do swaps on.
+#'
+#' @return A list with a matrix where each column contains a combination, and an integer vector of reach for each combination.
+#'
+#' @export
 run_batch <- function(df, possible_products, size, fixed = NA, keep_n = 20) {
   batch_products <- setdiff(possible_products, fixed)
   combs <- all_candidate_combinations(batch_products, size)
@@ -171,17 +184,17 @@ prepare_full_candidates <- function(all_candidates, fixed) {
 }
 
 
-#' Work out how many products each batch should add.
-#'
-#' The final batch's feasibility (whether it can produce at least
-#' `num_return` distinct combinations) only depends on how many products are
-#' fixed before it -- not on which earlier batches contributed them. So
-#' instead of checking one batch ahead at a time (which can't see past a
-#' single merge) or discovering a shortfall after committing batches and
-#' rolling back, we solve for the whole schedule once, upfront: search over
-#' how many trailing default-sized batches (`k`) need to be folded into the
-#' final one, then return the full vector of batch sizes (e.g.
-#' `c(1, 1, 1, 1, 1, 1, 2)`), always summing to `num_products`.
+# Work out how many products each batch should add.
+#
+# The final batch's feasibility (whether it can produce at least
+# `num_return` distinct combinations) only depends on how many products are
+# fixed before it -- not on which earlier batches contributed them. So
+# instead of checking one batch ahead at a time (which can't see past a
+# single merge) or discovering a shortfall after committing batches and
+# rolling back, we solve for the whole schedule once, upfront: search over
+# how many trailing default-sized batches (`k`) need to be folded into the
+# final one, then return the full vector of batch sizes (e.g.
+# `c(1, 1, 1, 1, 1, 1, 2)`), always summing to `num_products`.
 determine_batch_sizes <- function(
   n_possible,
   num_products,

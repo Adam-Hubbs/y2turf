@@ -4,6 +4,11 @@
 #' Sorts rows by total reach, then by frequency
 #'
 #' Returns the sorted result matrix
+#' @inheritParams turf df possible_products num_return
+#' @param fixed_before_final_batch The combination that was fixed before the final batch. Used for optimizing the sorting since we know this is in a good order already.
+#' @param final_batch_result A vector of the activations for the combinations that were fixed before the final batch.
+#'
+#' @return The sorted result of turf()
 collect_top_combos <- function(
   df,
   possible_products,
@@ -64,16 +69,21 @@ collect_top_combos <- function(
 
 #' Find product sort order
 #'
-#' Returns the canonical ordering
+#' Returns the canonical ordering of the products by individual reach.
+#' Ties are broken by the order in which they were passed to [turf()].
+#'
+#' @param products A character vector of products to sort
+#' @param solo_counts The reach of each product to sort
+#' @param possible_products The universe of total possible products.
 product_sort_order <- function(products, solo_counts, possible_products) {
   order(-solo_counts[products], match(products, possible_products))
 }
 
 #' Sort Products
 #'
-#' Sorts the matrix so that products are in the correct order. Orders by reach.
+#' Sorts the matrix so that products are in the correct order. Orders by individual reach.
 #'
-#' @param df The activation dataframe
+#' @inheritParams turf df
 #' @param candidate_matrix The matrix to sort
 #' @param possible_products The products in the universe
 #'
@@ -84,7 +94,7 @@ canonicalize_combos <- function(df, candidate_matrix, possible_products) {
     candidate_matrix,
     2,
     \(products) {
-      products[product_sort_order(products, solo_counts, possible_products)]
+      sort_products(products, solo_counts, possible_products)
     }
   )
 }

@@ -7,7 +7,7 @@
 canonicalize_combos(df, candidate_matrix, possible_products)
 }
 \arguments{
-\item{df}{The activation dataframe}
+\item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
 
 \item{candidate_matrix}{The matrix to sort}
 
@@ -17,5 +17,5 @@ canonicalize_combos(df, candidate_matrix, possible_products)
 The candidate_matrix, sorted
 }
 \description{
-Sorts the matrix so that products are in the correct order. Orders by reach.
+Sorts the matrix so that products are in the correct order. Orders by individual reach.
 }

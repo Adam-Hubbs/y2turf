@@ -1,18 +1,20 @@
-#' Starting from `combs` (the candidate combinations `run_batch()` returned
-#' for this batch -- just the new products) plus `fixed` (products already
-#' committed from earlier batches), repeatedly swap one product at a time --
-#' anywhere in the full combination, including previously-fixed products --
-#' keeping the best `top_n` combinations each round. The previous round's
-#' combos are always carried into the next round's candidate pool, so the
-#' kept `total_reach` values can only stay the same or improve round over
-#' round; the search stops once the top-`top_n` set of combinations stops
-#' changing. Returns the same shape as `top_n_combinations()`, plus
-#' `n_combinations`: the total number of swap combinations scored across all
-#' rounds. That count is taken straight from each round's `do_swaps()`
-#' output (which already de-duplicates *within* a round) without bothering
-#' to also net out combinations that happen to repeat across rounds or
-#' against `current$combos` -- overcounting slightly here doesn't matter for
-#' reporting purposes.
+# Starting from `combs` (the candidate combinations `run_batch()` returned
+# for this batch -- just the new products) plus `fixed` (products already
+# committed from earlier batches), repeatedly swap one product at a time --
+# anywhere in the full combination, including previously-fixed products --
+# keeping the best `top_n` combinations each round. The previous round's
+# combos are always carried into the next round's candidate pool, so the
+# kept `total_reach` values can only stay the same or improve round over
+# round; the search stops once the top-`top_n` set of combinations stops
+# changing. Returns the same shape as `top_n_combinations()`, plus
+# `n_combinations`: the total number of swap combinations scored across all
+# rounds. That count is taken straight from each round's `do_swaps()`
+# output (which already de-duplicates *within* a round) without bothering
+# to also net out combinations that happen to repeat across rounds or
+# against `current$combos` -- overcounting slightly here doesn't matter for
+# reporting purposes.
+#
+# @inheritParams turf df possible_products
 swap_until_stable <- function(
   df,
   combs,
@@ -50,10 +52,14 @@ swap_until_stable <- function(
 }
 
 
-# Build every one-product-swapped variant for each combination (a column) of
-# `candidate_matrix`, then canonicalize and de-duplicate. `candidate_matrix`
-# holds full-length combinations -- any element, including products fixed
-# from earlier batches, is eligible to be swapped out.
+#' Create matrix of potential swaps
+#'
+#' Creates all potential swaps we need to check from the given candidate_matrix.
+#'
+#' @inheritParams turf df possible_products
+#' @param candidate_matrix A matrix with the candidate combinations for this stage.
+#'
+#' @return A new matrix with all the potential swaps we need to check (de-duplicated).
 do_swaps <- function(df, candidate_matrix, possible_products) {
   potential_swaps <- candidate_matrix |>
     apply(
@@ -92,14 +98,19 @@ find_swaps <- function(single_combination, full_product_list) {
 }
 
 
-# Total reach (activation count) for one full product combination -- the
-# score each swap candidate is judged on.
+#' Get the reach (activation count) for a product combination
+#'
+#' @inheritParams turf df
+#' @param combination A combination of products to get the marginal activation of.
+#'
+#' @return An integer indicating the total number of unique activations (reach) of the combination of products.
 run_swap <- function(df, combination) {
-  sum(get_activations(df, combination))
+  marginal_activations(get_activations(df, combination))
 }
 
 # Score every combination (column) in `candidate_matrix` and keep the best
 # `top_n`
+#' @inheritParams turf df
 top_n_combinations <- function(df, candidate_matrix, top_n) {
   total_reach <- apply(candidate_matrix, 2, \(products) run_swap(df, products))
 
@@ -112,10 +123,16 @@ top_n_combinations <- function(df, candidate_matrix, top_n) {
   )
 }
 
-# Compare two sets of combinations for equality, ignoring column order.
-# Products *within* each column are already canonicalized (see
-# `do_swaps()`), so a plain string key per column is enough to compare sets.
-combo_set_unchanged <- function(previous_combos, current_combos) {
+#' Compare two sets of combinations for equality, ignoring column order.
+#'
+#' Products *within* each column are already canonicalized (see
+#' `do_swaps()`), so a plain string key per column is enough to compare sets.
+#' @param x_combos A combinations matrix
+#' @param y_combos A combination matrix
+#'
+#' @return A boolean indicating whether the matricies are equivilent.
+#' @export
+combo_set_unchanged <- function(x_combos, y_combos) {
   key <- \(m) apply(m, 2, paste, collapse = "|")
-  setequal(key(previous_combos), key(current_combos))
+  setequal(key(x_combos), key(y_combos))
 }

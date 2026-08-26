@@ -4,3 +4,4 @@
 ^[.]?air[.]toml$
 ^[.]?jarl[.]toml$
 ^\.vscode$
+^\.github$
