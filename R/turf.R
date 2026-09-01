@@ -37,7 +37,11 @@ turf <- function(
     swap_top_n
   )
 
-  product_order <- determine_product_order(df, possible_products)
+  mat <- df |>
+    dplyr::mutate(dplyr::across(dplyr::everything(), \(x) as.integer(x))) |>
+    as.matrix()
+
+  product_order <- determine_product_order(mat, possible_products)
 
   batch_sizes <- determine_batch_sizes(
     length(possible_products),
@@ -63,7 +67,7 @@ turf <- function(
       keep_n_at_batch
     }
     final_batch_result <- run_batch(
-      df,
+      mat,
       possible_products,
       size,
       fixed = if (length(fixed) == 0) NA else fixed,
@@ -80,7 +84,7 @@ turf <- function(
       # not just a seed for the next batch -- so widen its `top_n` to cover
       # `num_return` distinct combinations rather than just `swap_top_n`.
       swap_result <- swap_until_stable(
-        df,
+        mat,
         final_batch_result$combos,
         fixed,
         possible_products,
@@ -112,7 +116,7 @@ turf <- function(
 
   result <- if (is.null(final_swap_result)) {
     collect_top_combos(
-      df,
+      mat,
       fixed_before_final_batch,
       final_batch_result,
       num_return,
@@ -123,7 +127,7 @@ turf <- function(
       seq_len(ncol(final_swap_result$combos)),
       \(i) final_swap_result$combos[, i]
     )
-    rank_combos(df, combos_list, num_return, product_order)
+    rank_combos(mat, combos_list, num_return, product_order)
   }
 
   if (show_combinations) {
@@ -256,4 +260,15 @@ determine_batch_sizes <- function(
 
   n_prior_batches <- (num_products - final_size) %/% batch_size
   c(rep(batch_size, n_prior_batches), final_size)
+}
+
+
+# jarl-ignore unused_function: Used in benchmarking
+make_col_combinations <- function(ncol, n, size_range = 1:ncol, seed = NULL) {
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
+  sizes <- sample(size_range, n, replace = TRUE)
+  lapply(sizes, \(size) sort(sample.int(ncol, size)))
 }

@@ -10,7 +10,7 @@
 #'
 #' @return `possible_products`, reordered into canonical sort order.
 determine_product_order <- function(df, possible_products) {
-  solo_counts <- colSums(df[possible_products])
+  solo_counts <- colSums(df[, possible_products, drop = FALSE])
   possible_products[order(-solo_counts, seq_along(possible_products))]
 }
 

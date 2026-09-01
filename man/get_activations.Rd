@@ -4,10 +4,10 @@
 \alias{get_activations}
 \title{Get number of unique activations (reach)}
 \usage{
-get_activations(df, cols)
+get_activations(mat, cols)
 }
 \arguments{
-\item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
+\item{mat}{Matrix}
 
 \item{cols}{A character vector of product/column names to find activations for
 

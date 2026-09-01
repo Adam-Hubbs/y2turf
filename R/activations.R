@@ -1,6 +1,6 @@
 #' Get number of unique activations (reach)
 #'
-#' @inheritParams turf df
+#' @param mat Matrix
 #' @param cols A character vector of product/column names to find activations for
 #'
 #' Note: This function is for internal use and does not preform error checking.
@@ -8,8 +8,8 @@
 #'
 #' @return An vector representing the reach of that combination of products for each individual.
 #' @export
-get_activations <- function(df, cols) {
-  as.integer(do.call(pmax, df[cols]) > 0)
+get_activations <- function(mat, cols) {
+  rowSums(mat[, cols, drop = FALSE]) > 0
 }
 
 #' Get frequency of activation
@@ -22,7 +22,7 @@ get_activations <- function(df, cols) {
 #' @returns Integer - the total frequency
 #' @export
 combo_frequency <- function(df, products) {
-  sum(df[products])
+  sum(df[, products, drop = FALSE])
 }
 
 #' Get the marginal activations of a combination
@@ -37,4 +37,14 @@ combo_frequency <- function(df, products) {
 #' @export
 marginal_activations <- function(vec) {
   sum(vec)
+}
+
+# For testing
+# jarl-ignore unused_function: <reason>
+apply_get_activations <- function(mat, combos) {
+  vapply(
+    combos,
+    \(cols) get_activations(mat, cols) |> marginal_activations(),
+    integer(1)
+  )
 }

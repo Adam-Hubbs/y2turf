@@ -6,3 +6,4 @@
 ^\.vscode$
 ^\.github$
 ^data-raw$
+^bench$

@@ -188,7 +188,7 @@ am <- am |>
       ),
       \(x) {
         dplyr::if_else(
-          sample(c(TRUE, FALSE), 15000L, TRUE, c(0.05, 0.95)),
+          sample(c(TRUE, FALSE), 15000L, TRUE, c(0.1, 0.9)),
           0L,
           x
         )
@@ -217,7 +217,7 @@ am <- am |>
       ),
       \(y) {
         dplyr::if_else(
-          sample(c(TRUE, FALSE), 15000L, TRUE, c(0.1, 0.8)),
+          sample(c(TRUE, FALSE), 15000L, TRUE, c(0.1, 0.9)),
           1L,
           y
         )
@@ -240,7 +240,7 @@ pick_n <- function(df, n) {
 }
 
 am <- am |>
-  pick_n(4)
+  pick_n(5)
 
 am |>
   dplyr::mutate(total = rowSums(dplyr::across(tidyselect::everything()))) |>
