@@ -7,3 +7,9 @@
 ^\.github$
 ^data-raw$
 ^bench$
+^src/rust/\.cargo$
+^src/rust/target$
+^src/Makevars$
+^src/Makevars\.win$
+^benchmarks\.R$
+^profiling\.R$

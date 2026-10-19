@@ -1,18 +1,296 @@
 #' Run a TURF analysis
 #'
-#' Runs a TURF analysis with an efficient algorithm that only checks combinations that are plausibly correct.
+#' @description
+#' TURF (total unduplicated reach and frequency) analysis looks for the
+#' combination of `num_products` products that reaches the most respondents,
+#' where a respondent is reached if they are activated by (would choose) at
+#' least one product in the combination. `turf()` returns the best
+#' `num_return` combinations.
 #'
-#' @param df The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.
-#' @param possible_products The universe of possible products we are testing. Given as a character vector.
-#' @param num_products The number of products to be included in our competetive set. A positive integer.
-#' @param batch_size The number of products to solve for at a given time. A positive integer. Note: We may override this in order to make sure we hit num_return.
-#' @param keep_n_at_batch The number of solutions from each batch that we do the swapping step on. A positive integer.
-#' @param num_return The n-best solutions to return from turf(). A positive integer.
-#' @param show_combinations Whether to show the number of combinations searched or not. A boolean.
-#' @param use_swaps Whether to augment the main algorithm with swapping after each batch_size. A boolean.
-#' @param swap_top_n The number of combinations the swap algorithm continues each step on until they no longer change. A positive integer.
+#' Scoring every combination quickly becomes infeasible: 53 products have
+#' 886 million combinations of 8. Instead, `turf()` builds combinations up in
+#' batches and repairs them with a local swap search, scoring only a small
+#' fraction of all combinations. This usually finds the best combination, but
+#' unless `batch_size = num_products` it is not guaranteed to. The sections
+#' below explain each step.
 #'
-#' @return A dataframe with the combinations and corresponding reach
+#' @details
+#' # Reach and frequency
+#'
+#' A combination's *reach* is the number of respondents activated by at least
+#' one of its products. Its *frequency* is its total number of activations, so
+#' a respondent activated by two of its products counts twice:
+#'
+#' ```
+#'                  respondent   1 2 3 4 5 6
+#'   product A                   1 1 0 0 0 0
+#'   product B                   0 1 1 1 0 0
+#'   {A, B} reaches              x x x x . .    reach 4, frequency 5
+#' ```
+#'
+#' Given products already chosen, a candidate's *marginal reach* is the number
+#' of respondents it reaches that the chosen products don't. Above, B's
+#' marginal reach given A is 2 (respondents 3 and 4).
+#'
+#' # Overview
+#'
+#' ```
+#'   put products in order of individual reach
+#'                       |
+#'                       v
+#'   plan batch sizes          e.g. 7 products in batches of 3: 3, 3, 1
+#'                       |
+#'                       v
+#'   +-- for each batch ------------------------------------------+
+#'   |  1. score every way of adding `size` products to the fixed |
+#'   |     set F by marginal reach, and keep the best             |
+#'   |     `keep_n_at_batch`                                      |
+#'   |  2. complete each kept combination with F                  |
+#'   |  3. after the first batch, if `use_swaps`: swap search     |
+#'   |  4. fix the best combination as F for the next batch       |
+#'   +------------------------------------------------------------+
+#'                       |
+#'                       v
+#'   return the final batch's best `num_return` combinations
+#' ```
+#'
+#' # Planning batches
+#'
+#' The `num_products` products are found in batches of `batch_size`, with the
+#' final batch taking the remainder. Each batch chooses only among products
+#' not chosen yet:
+#'
+#' ```
+#'   53 products, num_products = 7, batch_size = 3
+#'
+#'   batch 1:  best 3 of 53                          F = {a, b, c}
+#'   batch 2:  best 3 of the other 50, given F       F = {a, b, c, d, e, f}
+#'   batch 3:  best 1 of the other 47, given F       -> results
+#' ```
+#'
+#' The final batch must be able to produce `num_return` distinct combinations.
+#' If it can't, it is combined with the batch before it (repeatedly, if
+#' needed), with a warning. For example, 5 products in batches of 2 would be
+#' batches of 2, 2, and 1, but the final batch has only 49 products to choose
+#' from. With `num_return = 60`, the last two batches are combined into one of
+#' 3, which has `choose(51, 3)` = 20,825 candidates, giving batches of 2 and 3.
+#'
+#' # Scoring a batch
+#'
+#' Respondents already reached by the fixed set F can't add to any
+#' candidate's reach, so they are set aside and candidates are scored by
+#' marginal reach among the rest:
+#'
+#' ```
+#'              respondent   1 2 3 4 5 6 7 8 9 10
+#'   F = {A}                 x x x x x x . . . .
+#'   still to reach                      7 8 9 10
+#'
+#'   add B                   1 1 1 0 0 0 1 1 0 0    +2  (7, 8)
+#'   add C                   0 0 0 1 1 1 0 0 1 1    +2  (9, 10)
+#'   add D                   1 0 0 0 0 0 0 0 0 0    +0
+#' ```
+#'
+#' Every combination of `size` remaining products is scored; nothing is
+#' pruned. The best `keep_n_at_batch` (at least `num_return` in the final
+#' batch) are kept and completed with F. Every candidate shares F, so ranking
+#' them by marginal reach is the same as ranking them by total reach.
+#'
+#' Without swaps, each batch is a greedy step: it commits to the best
+#' `batch_size` products given what was already chosen, and never revisits
+#' that choice.
+#'
+#' # Swap search
+#'
+#' Greedy steps can lock in an early choice that turns out to be poor. With
+#' batches of 1:
+#'
+#' ```
+#'              respondent   1 2 3 4 5 6 7 8 9 10    reach
+#'   A                       1 1 1 1 1 1 0 0 0 0       6
+#'   B                       1 1 1 0 0 0 1 1 0 0       5
+#'   C                       0 0 0 1 1 1 0 0 1 1       5
+#'
+#'   batch 1 picks A (best alone); batch 2 adds B or C     -> 8
+#'   swapping A for C turns {A, B} into {B, C}             -> 10
+#' ```
+#'
+#' So when `use_swaps = TRUE`, every batch after the first is followed by a
+#' swap search over complete combinations, starting from the batch's kept
+#' combinations. Each round generates every combination one swap away from a
+#' kept combination: any one product, including products fixed by earlier
+#' batches, is replaced with any product not in the combination.
+#'
+#' ```
+#'   products A, B, C, D; kept combination {A, B}
+#'
+#'   swap out A:   {C, B}   {D, B}
+#'   swap out B:   {A, C}   {A, D}
+#' ```
+#'
+#' These swaps are pooled with the kept combinations themselves, and the best
+#' `swap_top_n` (at least `num_return` in the final batch) are kept for the
+#' next round:
+#'
+#' ```
+#'   round 1:   K1  ->  K1 + every swap of K1  ->  best swap_top_n  =  K2
+#'   round 2:   K2  ->  K2 + every swap of K2  ->  best swap_top_n  =  K3
+#'   ...
+#'   stop when a round keeps what it started with (K3 = K2)
+#' ```
+#'
+#' Since the kept combinations are always in the pool, results never get
+#' worse from one round to the next. When the search stops, no swap of any
+#' kept combination beats the worst of them; in particular, no single swap
+#' improves the best combination. The search gives up after 50 rounds, with a
+#' warning, and returns the best combinations found so far.
+#'
+#' The first batch is never followed by a swap search: it already scored every
+#' combination of its size, and a swap only produces another combination of
+#' the same size.
+#'
+#' # Ranking and ties
+#'
+#' Combinations are ranked by total reach, then by total frequency. Any
+#' remaining ties go to the combination whose products have higher individual
+#' reach. Products are put in order of individual reach (ties broken by their
+#' order in `possible_products`), and tied combinations are compared product
+#' by product in that order. Each returned combination lists its products in
+#' this order. Within a batch, candidates are ranked the same way, using
+#' marginal rather than total reach and frequency.
+#'
+#' # Combinations searched
+#'
+#' With `show_combinations = TRUE`, `turf()` reports how many combinations it
+#' scored. *Regular* combinations are those scored by batches: for each batch,
+#' `choose(remaining products, batch size)`. *Swap* combinations are those
+#' generated by swap searches, with duplicates removed within each round but
+#' not across rounds.
+#'
+#' # Choosing the arguments
+#'
+#' * `batch_size` matters most. Larger batches look further ahead, so they
+#'   are less likely to lock in a poor choice, and `batch_size = num_products`
+#'   scores every combination, guaranteeing the best result. But the cost grows
+#'   very fast: each batch scores `choose(remaining products, batch_size)`
+#'   combinations (see below).
+#' * `use_swaps` repairs poor choices made by earlier batches, usually at
+#'   small cost.
+#' * `keep_n_at_batch` gives the swap search more starting points, at small
+#'   cost.
+#' * `swap_top_n` widens the swap search, so it explores more alternatives
+#'   before stopping. Each round scores about `swap_top_n * k * (n - k)`
+#'   combinations of `k` of `n` products.
+#'
+#' Combinations of each size among 53 products:
+#'
+#' | Size | Combinations |
+#' |-----:|-------------:|
+#' | 1    | 53           |
+#' | 2    | 1,378        |
+#' | 3    | 23,426       |
+#' | 4    | 292,825      |
+#' | 5    | 2,869,685    |
+#' | 6    | 22,957,480   |
+#' | 8    | 886,322,710  |
+#'
+#' A practical approach is to start with small batches and swaps, then check
+#' whether larger batches (or a larger `swap_top_n`) change the result.
+#'
+#' # Implementation
+#'
+#' The search runs in Rust, and relies on three ideas.
+#'
+#' **Respondents as bits.** Each product is stored as a bitset with one bit
+#' per respondent, 64 respondents to a machine word. A combination's reach is
+#' the number of set bits in the OR of its products' bitsets, and its
+#' frequency is the sum of per-product counts computed once up front:
+#'
+#' ```
+#'   respondent   1 2 3 4 5 6 7 8
+#'   A            1 1 1 1 1 1 0 0
+#'   B            1 1 1 0 0 0 1 1
+#'   A OR B       1 1 1 1 1 1 1 1     set bits = reach = 8
+#' ```
+#'
+#' For a batch, the bitsets cover only respondents not reached by F, so set
+#' bits count marginal reach directly, and the bitsets shrink as F grows.
+#'
+#' **Shared work.** A batch's combinations are visited depth first, in
+#' lexicographic order, carrying the OR of the products chosen so far. The OR
+#' for `{a, b}` is computed once and shared by every `{a, b, ...}` below it,
+#' so each combination costs a single OR and count, whatever its size:
+#'
+#' ```
+#'   {a} --+-- {a, b} --+-- {a, b, c}
+#'         |            +-- {a, b, d}
+#'         |            +-- {a, b, e}
+#'         +-- {a, c} --+-- {a, c, d}
+#'         |            +-- {a, c, e}
+#'         +-- {a, d} ----- {a, d, e}
+#'   {b} --+-- {b, c} --+-- {b, c, d}
+#'   ...
+#' ```
+#'
+#' **Bounded memory.** Combinations are never stored in bulk. Each one is
+#' scored as it is visited, and only the best are kept, in a fixed-size heap.
+#' The work is split across threads by first product, and swaps are also
+#' scored in parallel.
+#'
+#' @param df A data frame of activations, with one row per respondent and one
+#'   column per product. Columns named in `possible_products` must contain only
+#'   `0` and `1`. Other columns are ignored.
+#' @param possible_products A character vector of the products (column names of
+#'   `df`) to choose from.
+#' @param num_products The number of products in each combination. A positive
+#'   integer no greater than `length(possible_products)`.
+#' @param batch_size The number of products each batch adds. A positive
+#'   integer. The final batch may be enlarged to make sure `num_return`
+#'   combinations can be returned.
+#' @param keep_n_at_batch The number of combinations each batch keeps; these
+#'   seed the swap search. A positive integer. The final batch keeps at least
+#'   `num_return`.
+#' @param num_return The number of combinations to return. A positive integer.
+#' @param show_combinations Whether to report how many combinations were
+#'   searched, and attach the counts to the result as attributes. A boolean.
+#' @param use_swaps Whether to refine every batch after the first with a swap
+#'   search. A boolean.
+#' @param swap_top_n The number of combinations the swap search keeps (and
+#'   swaps from) each round. A positive integer. The final swap search keeps
+#'   at least `num_return`.
+#'
+#' @returns A tibble with one row per combination, best first, and columns:
+#'   * `rank`: integer rank, starting at 1.
+#'   * `products`: a list of character vectors, each holding a combination's
+#'     products in descending order of individual reach.
+#'   * `total_reach`: the number of respondents reached by the combination.
+#'   * `total_frequency`: the total number of activations across the
+#'     combination's products.
+#'
+#'   When `show_combinations = TRUE`, the attributes `n_combinations`,
+#'   `n_regular_combinations`, and `n_swap_combinations` hold the number of
+#'   combinations scored in total, by batches, and by swaps.
+#' @seealso [run_batch()] to run a single batch.
+#' @examples
+#' turf(
+#'   am,
+#'   colnames(am),
+#'   num_products = 4,
+#'   batch_size = 2,
+#'   keep_n_at_batch = 10,
+#'   num_return = 3
+#' )
+#'
+#' # One batch of every product scores every combination: exact, but the
+#' # number of combinations grows very quickly with `num_products`
+#' turf(
+#'   am,
+#'   colnames(am),
+#'   num_products = 3,
+#'   batch_size = 3,
+#'   keep_n_at_batch = 10,
+#'   num_return = 3
+#' )
 #' @export
 turf <- function(
   df,
@@ -37,11 +315,7 @@ turf <- function(
     swap_top_n
   )
 
-  mat <- df |>
-    dplyr::mutate(dplyr::across(dplyr::everything(), \(x) as.integer(x))) |>
-    as.matrix()
-
-  product_order <- determine_product_order(mat, possible_products)
+  mat <- as_activation_matrix(df[possible_products])
 
   batch_sizes <- determine_batch_sizes(
     length(possible_products),
@@ -51,181 +325,117 @@ turf <- function(
   )
   warn_if_batches_combined(batch_sizes, batch_size, num_products, num_return)
 
-  fixed <- character(0)
-  fixed_before_final_batch <- character(0)
-  final_batch_result <- NULL
-  final_swap_result <- NULL
-  regular_combinations_searched <- 0
-  swap_combinations_searched <- 0
-
-  for (i in seq_along(batch_sizes)) {
-    size <- batch_sizes[i]
-    is_final_batch <- i == length(batch_sizes)
-    keep_n_at_this_batch <- if (is_final_batch) {
-      max(keep_n_at_batch, num_return)
-    } else {
-      keep_n_at_batch
-    }
-    final_batch_result <- run_batch(
-      mat,
-      possible_products,
-      size,
-      fixed = if (length(fixed) == 0) NA else fixed,
-      keep_n = keep_n_at_this_batch
-    )
-    regular_combinations_searched <- regular_combinations_searched +
-      final_batch_result$n_combinations
-
-    fixed_before_final_batch <- fixed
-    final_swap_result <- NULL
-
-    if (use_swaps && i > 1) {
-      # On the final batch, the swap step's own result *is* the output --
-      # not just a seed for the next batch -- so widen its `top_n` to cover
-      # `num_return` distinct combinations rather than just `swap_top_n`.
-      swap_result <- swap_until_stable(
-        mat,
-        final_batch_result$combos,
-        fixed,
-        possible_products,
-        product_order,
-        top_n = if (is_final_batch) max(swap_top_n, num_return) else swap_top_n,
-        starting_n = keep_n_at_this_batch
-      )
-      swap_combinations_searched <- swap_combinations_searched +
-        swap_result$n_combinations
-
-      if (is_final_batch) {
-        final_swap_result <- swap_result
-      } else {
-        fixed <- swap_result$combos[, 1]
-      }
-    } else {
-      fixed <- c(fixed, final_batch_result$combos[, 1])
-    }
-  }
-
-  warn_if_insufficient_combos(
-    if (is.null(final_swap_result)) {
-      ncol(final_batch_result$combos)
-    } else {
-      ncol(final_swap_result$combos)
-    },
-    num_return
+  search <- turf_search(
+    mat,
+    as.integer(batch_sizes),
+    as.integer(keep_n_at_batch),
+    as.integer(num_return),
+    use_swaps,
+    as.integer(swap_top_n)
   )
 
-  result <- if (is.null(final_swap_result)) {
-    collect_top_combos(
-      mat,
-      fixed_before_final_batch,
-      final_batch_result,
-      num_return,
-      product_order
+  if (!search$converged) {
+    cli::cli_warn(
+      "Swap search did not converge; returning the best combinations found so far."
     )
-  } else {
-    combos_list <- purrr::map(
-      seq_len(ncol(final_swap_result$combos)),
-      \(i) final_swap_result$combos[, i]
-    )
-    rank_combos(mat, combos_list, num_return, product_order)
   }
 
+  result <- tibble::tibble(
+    rank = seq_along(search$reach),
+    products = lapply(
+      seq_along(search$reach),
+      \(i) possible_products[search$combos[, i]]
+    ),
+    total_reach = search$reach,
+    total_frequency = search$frequency
+  )
+  warn_if_insufficient_combos(nrow(result), num_return)
+
   if (show_combinations) {
-    total_combinations_searched <- regular_combinations_searched +
-      swap_combinations_searched
+    n_regular <- search$n_regular
+    n_swap <- search$n_swap
+    n_total <- n_regular + n_swap
     cli::cli_inform(
-      "Searched {total_combinations_searched} combination{?s}: {regular_combinations_searched} regular combination{?s} and {swap_combinations_searched} swap combination{?s} across {length(batch_sizes)} batch{?es}."
+      "Searched {n_total} combination{?s}: {n_regular} regular combination{?s} and {n_swap} swap combination{?s} across {length(batch_sizes)} batch{?es}."
     )
-    attr(result, "n_combinations") <- total_combinations_searched
-    attr(result, "n_regular_combinations") <- regular_combinations_searched
-    attr(result, "n_swap_combinations") <- swap_combinations_searched
+    attr(result, "n_combinations") <- n_total
+    attr(result, "n_regular_combinations") <- n_regular
+    attr(result, "n_swap_combinations") <- n_swap
   }
 
   result
 }
 
-#' Run a the turf algorithm for a batch
+#' Run a single batch of a TURF analysis
 #'
-#' @inheritParams turf df possible_products
-#' @param size The size of the batch (Number of additional products to determine order for)
-#' @param fixed A character vecor of products who have already been found in a previous batch
-#' @param keep_n The number of top combinations to do swaps on.
+#' Scores every combination of `size` products drawn from `possible_products`
+#' (excluding `fixed`) by marginal reach: the number of respondents it reaches
+#' who are not already reached by `fixed`. This is one step of [turf()],
+#' exposed for inspection.
 #'
-#' @return A list with a matrix where each column contains a combination, and an integer vector of reach for each combination.
+#' Combinations are ranked by marginal reach, then marginal frequency (total
+#' activations among respondents not reached by `fixed`), then the order of
+#' their products in `possible_products`. Scoring runs in Rust.
 #'
+#' @param df A data frame or matrix of activations, with one row per
+#'   respondent and one column per product. Columns named in
+#'   `possible_products` or `fixed` must contain only `0` and `1`. Other
+#'   columns are ignored.
+#' @inheritParams turf
+#' @param size The number of products in each combination. A positive integer
+#'   no greater than the number of products in `possible_products` but not in
+#'   `fixed`.
+#' @param fixed A character vector of products already chosen, or `NA` for
+#'   none.
+#' @param keep_n The number of combinations to keep. A positive integer.
+#'
+#' @returns A list with elements:
+#'   * `combos`: a character matrix with `size` rows and one column per kept
+#'     combination, best first.
+#'   * `reach`: an integer vector of each kept combination's marginal reach.
+#'   * `n_combinations`: the number of combinations scored.
+#' @examples
+#' batch <- run_batch(am, colnames(am), size = 2, keep_n = 3)
+#' batch$combos
+#'
+#' # The best products to add to the current leader
+#' run_batch(am, colnames(am), size = 1, fixed = batch$combos[, 1], keep_n = 3)
 #' @export
 run_batch <- function(df, possible_products, size, fixed = NA, keep_n = 20) {
-  batch_products <- setdiff(possible_products, fixed)
-  combs <- all_candidate_combinations(batch_products, size)
-
-  # Respondents already reached by `fixed` can't contribute any marginal
-  # reach, so drop them before scoring candidates
   has_fixed <- length(fixed) > 0 && !(length(fixed) == 1 && is.na(fixed))
-  slim_df <- if (has_fixed) {
-    df[get_activations(df, fixed) == 0, , drop = FALSE]
-  } else {
-    df
-  }
+  fixed <- if (has_fixed) fixed else character(0)
+  batch_products <- setdiff(possible_products, fixed)
 
-  # Proof of concept: score every combination one at a time. Fine for now;
-  # revisit (vectorize/chunk, or rewrite in C++/Rust) once this needs to run
-  # at real scale.
-  reach <- apply(combs, 2, \(cols) {
-    marginal_activations(get_activations(slim_df, cols))
-  })
-
-  # This is not tie-stable. Need to seperate it out into just order. Then split to see if there is a tie. If there is, run get_activations on all to find frequency.
-  keep <- order(reach, decreasing = TRUE)[seq_len(min(keep_n, length(reach)))]
-  # Note that this returns marginal reach not full reach. `n_combinations` is
-  # the count *before* trimming to `keep_n` -- i.e. how many candidates this
-  # batch actually searched -- and is essentially free since `combs` already
-  # exists; `turf()` sums this across batches and only surfaces it when
-  # `show_combinations = TRUE`.
-  list(
-    combos = combs[, keep, drop = FALSE],
-    reach = reach[keep],
-    n_combinations = ncol(combs)
-  )
-}
-
-all_candidate_combinations <- function(possible_products, size) {
-  n <- length(possible_products)
+  n <- length(batch_products)
   if (size > n) {
     cli::cli_abort(
       "{.arg size} {.val {size}} cannot exceed the number of possible products {.val {n}}."
     )
   }
 
-  n_combos <- choose(n, size)
-  if (n_combos > 2e8) {
-    cli::cli_warn(
-      "Requested {.val {n_combos}} combinations (n = {n}, size = {size}); this may exhaust memory/time."
-    )
-  }
+  mat <- as_activation_matrix(df[, c(batch_products, fixed), drop = FALSE])
+  res <- turf_run_batch(
+    mat,
+    match(batch_products, colnames(mat)),
+    match(fixed, colnames(mat)),
+    as.integer(size),
+    as.integer(keep_n)
+  )
 
-  rows <- vector("list", size)
-  rows[[1]] <- seq_len(n)
-  if (size > 1) {
-    for (step in 2:size) {
-      last <- rows[[step - 1]]
-      remaining <- n - last
-      for (r in seq_len(step - 1)) {
-        rows[[r]] <- rep.int(rows[[r]], remaining)
-      }
-      rows[[step]] <- sequence(remaining) + rep.int(last, remaining)
-    }
-  }
-
-  idx <- do.call(rbind, rows)
-  matrix(possible_products[idx], nrow = size)
+  list(
+    combos = matrix(colnames(mat)[res$combos], nrow = size),
+    reach = res$reach,
+    n_combinations = res$n_combinations
+  )
 }
 
-prepare_full_candidates <- function(all_candidates, fixed) {
-  n_combos <- ncol(all_candidates)
-  fixed_mat <- matrix(fixed, nrow = length(fixed), ncol = n_combos)
-  rbind(fixed_mat, all_candidates)
+as_activation_matrix <- function(df) {
+  mat <- as.matrix(df)
+  if (!is.integer(mat)) {
+    storage.mode(mat) <- "integer"
+  }
+  mat
 }
-
 
 # Work out how many products each batch should add.
 #

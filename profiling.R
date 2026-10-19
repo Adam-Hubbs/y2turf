@@ -4,11 +4,11 @@ profvis(
   turf(
     am,
     colnames(am),
-    num_products = 5,
-    batch_size = 1,
+    num_products = 8,
+    batch_size = 4,
     keep_n_at_batch = 15,
-    num_return = 5,
-    show_combinations = FALSE
+    num_return = 30,
+    show_combinations = TRUE
   ),
   interval = 0.005
 )

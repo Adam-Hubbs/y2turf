@@ -2,24 +2,52 @@
 % Please edit documentation in R/turf.R
 \name{run_batch}
 \alias{run_batch}
-\title{Run a the turf algorithm for a batch}
+\title{Run a single batch of a TURF analysis}
 \usage{
 run_batch(df, possible_products, size, fixed = NA, keep_n = 20)
 }
 \arguments{
-\item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
+\item{df}{A data frame or matrix of activations, with one row per
+respondent and one column per product. Columns named in
+\code{possible_products} or \code{fixed} must contain only \code{0} and \code{1}. Other
+columns are ignored.}
 
-\item{possible_products}{The universe of possible products we are testing. Given as a character vector.}
+\item{possible_products}{A character vector of the products (column names of
+\code{df}) to choose from.}
 
-\item{size}{The size of the batch (Number of additional products to determine order for)}
+\item{size}{The number of products in each combination. A positive integer
+no greater than the number of products in \code{possible_products} but not in
+\code{fixed}.}
 
-\item{fixed}{A character vecor of products who have already been found in a previous batch}
+\item{fixed}{A character vector of products already chosen, or \code{NA} for
+none.}
 
-\item{keep_n}{The number of top combinations to do swaps on.}
+\item{keep_n}{The number of combinations to keep. A positive integer.}
 }
 \value{
-A list with a matrix where each column contains a combination, and an integer vector of reach for each combination.
+A list with elements:
+\itemize{
+\item \code{combos}: a character matrix with \code{size} rows and one column per kept
+combination, best first.
+\item \code{reach}: an integer vector of each kept combination's marginal reach.
+\item \code{n_combinations}: the number of combinations scored.
+}
 }
 \description{
-Run a the turf algorithm for a batch
+Scores every combination of \code{size} products drawn from \code{possible_products}
+(excluding \code{fixed}) by marginal reach: the number of respondents it reaches
+who are not already reached by \code{fixed}. This is one step of \code{\link[=turf]{turf()}},
+exposed for inspection.
+}
+\details{
+Combinations are ranked by marginal reach, then marginal frequency (total
+activations among respondents not reached by \code{fixed}), then the order of
+their products in \code{possible_products}. Scoring runs in Rust.
+}
+\examples{
+batch <- run_batch(am, colnames(am), size = 2, keep_n = 3)
+batch$combos
+
+# The best products to add to the current leader
+run_batch(am, colnames(am), size = 1, fixed = batch$combos[, 1], keep_n = 3)
 }

@@ -2,21 +2,32 @@
 % Please edit documentation in R/activations.R
 \name{get_activations}
 \alias{get_activations}
-\title{Get number of unique activations (reach)}
+\title{Find the respondents a combination reaches}
 \usage{
 get_activations(mat, cols)
 }
 \arguments{
-\item{mat}{Matrix}
+\item{mat}{A data frame or matrix of activations, with one row per
+respondent and one column per product.}
 
-\item{cols}{A character vector of product/column names to find activations for
-
-Note: This function is for internal use and does not preform error checking.
-It is up to the caller to ensure the products exist as columns in the dataframe.}
+\item{cols}{A character vector of products (column names of \code{mat}).}
 }
 \value{
-An vector representing the reach of that combination of products for each individual.
+A logical vector with one element per row of \code{mat}: \code{TRUE} if that
+respondent is reached.
 }
 \description{
-Get number of unique activations (reach)
+A respondent is reached by a combination if they are activated by at least
+one of its products.
+}
+\details{
+This is a low-level helper and does no input checking: \code{cols} must be
+columns of \code{mat} containing only \code{0} and \code{1}.
+}
+\examples{
+reached <- get_activations(am, c("northwind", "may"))
+head(reached)
+}
+\seealso{
+\code{\link[=marginal_activations]{marginal_activations()}} to count the respondents reached.
 }

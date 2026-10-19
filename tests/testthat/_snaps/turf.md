@@ -1,9 +1,9 @@
-# all_candidate_combinations errors when size exceeds the product universe
+# run_batch errors when size exceeds the remaining products
 
     Code
-      all_candidate_combinations(c("A", "B"), 3)
+      run_batch(df, c("A", "B", "C"), size = 3, fixed = "A")
     Condition
-      Error in `all_candidate_combinations()`:
+      Error in `run_batch()`:
       ! `size` 3 cannot exceed the number of possible products 2.
 
 # turf() returns a correctly-ordered, correctly-shaped result for a real activation dataset
@@ -11,12 +11,12 @@
     Code
       result
     Output
-      # A tibble: 3 x 3
-         rank products  total_reach
-        <int> <list>          <int>
-      1     1 <chr [3]>        6951
-      2     2 <chr [3]>        6929
-      3     3 <chr [3]>        6923
+      # A tibble: 3 x 4
+         rank products  total_reach total_frequency
+        <int> <list>          <int>           <dbl>
+      1     1 <chr [3]>        5498            6162
+      2     2 <chr [3]>        5455            6147
+      3     3 <chr [3]>        5441            6145
 
 # turf() aborts when a required argument is missing or malformed
 
@@ -92,24 +92,24 @@
         keep_n_at_batch = 10)
     Condition
       Error in `turf()`:
-      ! `num_products` 100 cannot exceed the number of possible products 28.
+      ! `num_products` 100 cannot exceed the number of possible products 53.
 
 # turf() warns when the final batch must be combined with earlier batches
 
     Code
       result <- turf(am, possible_products, num_products = 5, batch_size = 2,
-        keep_n_at_batch = 50, num_return = 30, show_combinations = FALSE)
+        keep_n_at_batch = 50, num_return = 60, show_combinations = FALSE)
     Condition
       Warning:
-      The final batch was combined with 1 prior batch, growing it from 2 to 3 products, to generate at least 30 distinct results.
+      The final batch was combined with 1 prior batch, growing it from 2 to 3 products, to generate at least 60 distinct results.
 
 # turf() warns when fewer combinations exist than num_return
 
     Code
       result <- turf(am, possible_products, num_products = 1, batch_size = 1,
-        keep_n_at_batch = 50, num_return = 50, show_combinations = FALSE)
+        keep_n_at_batch = 50, num_return = 60, show_combinations = FALSE)
     Condition
       Warning:
-      Only 28 distinct combinations exist for the final batch.
-      i Returning all of them instead of the requested `num_return` = 50.
+      Only 53 distinct combinations exist for the final batch.
+      i Returning all of them instead of the requested `num_return` = 60.
 

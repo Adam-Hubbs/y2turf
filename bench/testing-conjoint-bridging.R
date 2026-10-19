@@ -7,7 +7,7 @@ library(tidyverse)
 library(haven)
 library(purrr)
 library(labelled)
-#pak::pak("y2analytics/y2conjoint@multi-competetive-sets")
+#pak::pak("y2analytics/y2conjoint")
 library(y2conjoint)
 library(devtools)
 load_all('.')
@@ -318,39 +318,586 @@ utility_df <- universe@products |>
 cols_bench <- universe@products |>
   y2conjoint:::product_output_names()
 
-# Create activation df
-row_max <- do.call(pmax, utility_df)
-row_2nd <- apply(utility_df, 1, \(row) sort(row, decreasing = TRUE)[2])
-row_3rd <- apply(utility_df, 1, \(row) sort(row, decreasing = TRUE)[3])
+## Create activation matricies ----
+row_max <- do.call(pmax, utility_df |> select(-NONE))
+row_2nd <- apply(utility_df |> select(-NONE), 1, \(row) {
+  sort(row, decreasing = TRUE)[2]
+})
+row_3rd <- apply(utility_df |> select(-NONE), 1, \(row) {
+  sort(row, decreasing = TRUE)[3]
+})
 
 # Activated if in top N
 top_1 <- utility_df |>
-  mutate(across(everything(), \(x) as.numeric(x == row_max)))
+  mutate(across(everything(), \(x) as.numeric(x == row_max & x != NONE)))
 
 top_2 <- utility_df |>
-  mutate(across(everything(), \(x) as.numeric(x >= row_2nd)))
+  mutate(across(everything(), \(x) as.numeric(x >= row_2nd & x != NONE)))
 
 top_3 <- utility_df |>
-  mutate(across(everything(), \(x) as.numeric(x >= row_3rd)))
+  mutate(across(everything(), \(x) as.numeric(x >= row_3rd & x != NONE)))
 
 # Activated if in top N AND utility greater than None
 top_1_none <- utility_df |>
-  mutate(across(everything(), \(x) as.numeric(x == row_max & x >= NONE)))
+  mutate(across(everything(), \(x) as.numeric(x == row_max & x > NONE)))
 
 top_2_none <- utility_df |>
-  mutate(across(everything(), \(x) as.numeric(x >= row_2nd & x >= NONE)))
+  mutate(across(everything(), \(x) as.numeric(x >= row_2nd & x > NONE)))
 
 top_3_none <- utility_df |>
-  mutate(across(everything(), \(x) as.numeric(x >= row_3rd & x >= NONE)))
-
-# top_1 is the same, many differences in top_2 and top_3
-waldo::compare(top_1, top_1_none)
-waldo::compare(top_2, top_2_none, max_diffs = 1) # 740 differences
-waldo::compare(top_3, top_3_none, max_diffs = 1) # 1092 differences
+  mutate(across(everything(), \(x) as.numeric(x >= row_3rd & x > NONE)))
 
 
-## turf() --------------------------------------------------------------------
+above_0 <- utility_df |>
+  mutate(across(everything(), \(x) as.numeric(x >= 0 & x != NONE)))
 
+above_0_and_none <- utility_df |>
+  mutate(across(everything(), \(x) as.numeric(x >= 0 & x > NONE)))
+
+above_1_and_none <- utility_df |>
+  mutate(across(everything(), \(x) as.numeric(x >= 1 & x > NONE)))
+
+above_2_and_none <- utility_df |>
+  mutate(across(everything(), \(x) as.numeric(x >= 2 & x > NONE)))
+
+above_3_and_none <- utility_df |>
+  mutate(across(everything(), \(x) as.numeric(x >= 3 & x > NONE)))
+
+# Cap activation at the top N products by utility
+cap_max_active <- function(active_df, utility_df, product_cols, max_n) {
+  utility_mat <- as.matrix(utility_df[product_cols])
+  active_mat <- as.matrix(active_df[product_cols])
+  ranks <- t(apply(-utility_mat, 1, rank, ties.method = "first"))
+  active_df[product_cols] <- active_mat * (ranks <= max_n)
+  active_df
+}
+
+above_1_and_none_max_8 <- cap_max_active(
+  above_1_and_none,
+  utility_df,
+  cols_bench,
+  8
+)
+
+above_2_and_none_max_8 <- cap_max_active(
+  above_2_and_none,
+  utility_df,
+  cols_bench,
+  8
+)
+
+above_3_and_none_max_8 <- cap_max_active(
+  above_3_and_none,
+  utility_df,
+  cols_bench,
+  8
+)
+
+
+above_1_and_none_max_5 <- cap_max_active(
+  above_1_and_none,
+  utility_df,
+  cols_bench,
+  5
+)
+
+above_2_and_none_max_5 <- cap_max_active(
+  above_2_and_none,
+  utility_df,
+  cols_bench,
+  5
+)
+
+above_3_and_none_max_5 <- cap_max_active(
+  above_3_and_none,
+  utility_df,
+  cols_bench,
+  5
+)
+
+
+# Activated if a product's preference share vs. NONE (individually) beats
+# NONE's share by at least `factor` times, i.e. exp(u) / (exp(u) + exp(NONE)) >=
+# factor / (1 + factor). Solving for u gives a per-respondent threshold of
+# NONE + log(factor), so NONE is exponentiated once and the resulting vector
+# is compared against each product's utility.
+beat_none_by_factor <- function(utility_df, factor) {
+  exp_none <- exp(utility_df$NONE)
+  threshold <- log(factor * exp_none)
+  utility_df |>
+    mutate(across(everything(), \(x) as.numeric(x >= threshold)))
+}
+
+beat_none_by_factor_and_threshold <- function(utility_df, factor, threshold_) {
+  exp_none <- exp(utility_df$NONE)
+  threshold <- log(factor * exp_none)
+  utility_df |>
+    mutate(across(everything(), \(x) {
+      as.numeric(x >= threshold & x > threshold_)
+    }))
+}
+
+beat_none_by_factor_and_max <- function(utility_df, factor, max) {
+  exp_none <- exp(utility_df$NONE)
+  threshold <- log(factor * exp_none)
+  utility_df |>
+    mutate(across(everything(), \(x) {
+      as.numeric(x >= threshold)
+    })) |>
+    cap_max_active(utility_df, cols_bench, max)
+}
+
+beats_avg <- function(utility_df, num) {
+  utility_df |>
+    mutate(across(everything(), \(x) {
+      as.numeric(x >= log(num))
+    }))
+}
+
+
+# Activated if a product's preference share, when the choice set is just
+# {utility-0 alternative, NONE, the product itself}, is at least
+# percent_threshold, i.e. exp(u) / (exp(u) + exp(0) + exp(NONE)) >=
+# percent_threshold. Solving for u gives a per-respondent threshold of
+# log(percent_threshold * (1 + exp(NONE)) / (1 - percent_threshold)).
+beats_comb_by <- function(utility_df, percent_threshold) {
+  exp_none <- exp(utility_df$NONE)
+  threshold <- log(percent_threshold * (1 + exp_none) / (1 - percent_threshold))
+  utility_df |>
+    mutate(across(everything(), \(x) as.numeric(x >= threshold)))
+}
+
+# Activated if a product's preference share, when the choice set is ALL real
+# products plus NONE, is at least percent_threshold:
+# exp(u_i) / (sum_j exp(u_j) + exp(NONE)) >= percent_threshold, where the sum
+# is over every real product (including i itself). That row total already
+# contains the tested product's own utility, so no algebra is needed to
+# isolate it -- we just rearrange exp(u_i) >= p * total_exp directly into a
+# per-row threshold on u_i.
+all_pref_share_real <- function(utility_df, percent_threshold) {
+  product_cols <- setdiff(names(utility_df), 'NONE')
+  total_exp <- rowSums(exp(as.matrix(utility_df[product_cols]))) +
+    exp(utility_df$NONE)
+  threshold <- log(percent_threshold * total_exp)
+  utility_df |>
+    mutate(across(everything(), \(x) as.numeric(x >= threshold))) |>
+    mutate(NONE = 0L)
+}
+
+# Activated if a product's preference share, when the choice set is the
+# product itself against num_products "average" alternatives (each with
+# utility 0, so exp(0) = 1) plus NONE, is at least percent_threshold:
+# exp(u) / (exp(u) + num_products * 1 + exp(NONE)) >= percent_threshold.
+# Here the denominator's num_products + exp(NONE) term is a fixed constant
+# (doesn't already contain u), so u has to be solved for algebraically --
+# same derivation as beats_comb_by, generalized from 1 average competitor to
+# num_products of them.
+all_pref_share_avg <- function(utility_df, percent_threshold) {
+  num_products <- length(setdiff(names(utility_df), 'NONE'))
+  exp_none <- exp(utility_df$NONE)
+  threshold <- log(
+    percent_threshold * (num_products + exp_none) / (1 - percent_threshold)
+  )
+  utility_df |>
+    mutate(across(everything(), \(x) as.numeric(x >= threshold))) |>
+    mutate(NONE = 0L)
+}
+
+# 2X (67%)
+beat_none_by_2_factor <- beat_none_by_factor(utility_df, 2)
+
+# 3X (75%)
+beat_none_by_3_factor <- beat_none_by_factor(utility_df, 3)
+
+# 4X (80%)
+beat_none_by_4_factor <- beat_none_by_factor(utility_df, 4)
+
+# 9X (90%)
+beat_none_by_9_factor <- beat_none_by_factor(utility_df, 9)
+
+beat_none_by_99_factor <- beat_none_by_factor(utility_df, 99)
+
+beat_none_by_9_factor_above_0 <- beat_none_by_factor_and_threshold(
+  utility_df,
+  9,
+  0
+)
+
+beat_none_by_99_factor_above_0 <- beat_none_by_factor_and_threshold(
+  utility_df,
+  99,
+  0
+)
+beat_none_by_9_factor_max_8 <- beat_none_by_factor_and_max(utility_df, 9, 8)
+
+beats_avg_by_2 <- beats_avg(utility_df, 2)
+beats_avg_by_3 <- beats_avg(utility_df, 3)
+beats_avg_by_4 <- beats_avg(utility_df, 4)
+beats_avg_by_9 <- beats_avg(utility_df, 9)
+beats_avg_by_20 <- beats_avg(utility_df, 20)
+beats_avg_by_99 <- beats_avg(utility_df, 99)
+
+beats_comb_50 <- beats_comb_by(utility_df, 0.50)
+beats_comb_75 <- beats_comb_by(utility_df, 0.75)
+beats_comb_80 <- beats_comb_by(utility_df, 0.80)
+beats_comb_90 <- beats_comb_by(utility_df, 0.90)
+
+avg_pshare_15 <- all_pref_share_real(utility_df, 0.15)
+avg_pshare_10 <- all_pref_share_real(utility_df, 0.1)
+avg_pshare_07 <- all_pref_share_real(utility_df, 0.07)
+
+avg_pshare_50a <- all_pref_share_avg(utility_df, 0.50)
+avg_pshare_25a <- all_pref_share_avg(utility_df, 0.25)
+avg_pshare_15a <- all_pref_share_avg(utility_df, 0.15)
+avg_pshare_10a <- all_pref_share_avg(utility_df, 0.1)
+
+
+## Look at the activation matricies -----
+
+freq_am <- function(data, data_label = rlang::caller_arg(data)) {
+  data |>
+    freq(digits = 3) |>
+    filter(value == 1) |>
+    rename(!!data_label := result) |>
+    arrange(desc(n)) |>
+    select(variable, !!data_label)
+}
+
+# Percent of a product that is activated by threshold
+list(
+  freq_am(top_1),
+  freq_am(top_2),
+  freq_am(top_3),
+  freq_am(top_1_none),
+  freq_am(top_2_none),
+  freq_am(top_3_none),
+  freq_am(beat_none_by_2_factor),
+  freq_am(beat_none_by_3_factor),
+  freq_am(beat_none_by_4_factor),
+  freq_am(beat_none_by_9_factor),
+  freq_am(beat_none_by_9_factor_above_0),
+  freq_am(beat_none_by_9_factor_max_8),
+  freq_am(beat_none_by_99_factor),
+  freq_am(beat_none_by_99_factor_above_0),
+  freq_am(beats_avg_by_2),
+  freq_am(beats_avg_by_3),
+  freq_am(beats_avg_by_4),
+  freq_am(beats_avg_by_9),
+  freq_am(beats_avg_by_20),
+  freq_am(beats_avg_by_99),
+  freq_am(beats_comb_50),
+  freq_am(beats_comb_75),
+  freq_am(beats_comb_80),
+  freq_am(beats_comb_90),
+  freq_am(avg_pshare_15),
+  freq_am(avg_pshare_10),
+  freq_am(avg_pshare_07),
+  freq_am(avg_pshare_50a),
+  freq_am(avg_pshare_25a),
+  freq_am(avg_pshare_15a),
+  freq_am(avg_pshare_10a)
+
+  # freq_am(above_0),
+  # freq_am(above_0_and_none),
+  # freq_am(above_1_and_none),
+  # freq_am(above_2_and_none),
+  # freq_am(above_3_and_none),
+  # freq_am(above_1_and_none_max_5),
+  # freq_am(above_2_and_none_max_5),
+  # freq_am(above_3_and_none_max_5),
+  # freq_am(above_1_and_none_max_8),
+  # freq_am(above_2_and_none_max_8),
+  # freq_am(above_3_and_none_max_8)
+) |>
+  reduce(left_join) |>
+  mutate(across(-variable, \(x) x * 100)) |>
+  view()
+
+num_activations <- function(data, data_label = rlang::caller_arg(data)) {
+  data |>
+    mutate(sums = rowSums(across(everything()))) |>
+    freq(sums, digits = 3) |>
+    select(value, !!data_label := result)
+}
+
+# Distribution of number of activations (per respondent) by threshold
+num_activations_dist <- list(
+  num_activations(top_1),
+  num_activations(top_2),
+  num_activations(top_3),
+  num_activations(top_1_none),
+  num_activations(top_2_none),
+  num_activations(top_3_none),
+  num_activations(beat_none_by_2_factor),
+  num_activations(beat_none_by_3_factor),
+  num_activations(beat_none_by_4_factor),
+  num_activations(beat_none_by_9_factor),
+  num_activations(beat_none_by_9_factor_above_0),
+  num_activations(beat_none_by_9_factor_max_8),
+  num_activations(beat_none_by_99_factor),
+  num_activations(beat_none_by_99_factor_above_0),
+  num_activations(beats_avg_by_2),
+  num_activations(beats_avg_by_3),
+  num_activations(beats_avg_by_4),
+  num_activations(beats_avg_by_9),
+  num_activations(beats_avg_by_20),
+  num_activations(beats_avg_by_99),
+  num_activations(beats_comb_50),
+  num_activations(beats_comb_75),
+  num_activations(beats_comb_80),
+  num_activations(beats_comb_90),
+  num_activations(avg_pshare_15),
+  num_activations(avg_pshare_10),
+  num_activations(avg_pshare_07),
+  num_activations(avg_pshare_50a),
+  num_activations(avg_pshare_25a),
+  num_activations(avg_pshare_15a),
+  num_activations(avg_pshare_10a)
+
+  # num_activations(above_0),
+  # num_activations(above_0_and_none),
+  # num_activations(above_1_and_none),
+  # num_activations(above_2_and_none),
+  # num_activations(above_3_and_none),
+  # num_activations(above_1_and_none_max_5),
+  # num_activations(above_2_and_none_max_5),
+  # num_activations(above_3_and_none_max_5),
+  # num_activations(above_1_and_none_max_8),
+  # num_activations(above_2_and_none_max_8),
+  # num_activations(above_3_and_none_max_8)
+) |>
+  reduce(full_join) |>
+  mutate(value = as.integer(value)) |>
+  arrange(value) |>
+  mutate(across(-value, \(x) x * 100))
+
+num_activations_average <- num_activations_dist |>
+  summarise(across(-value, \(x) sum(value * x / 100, na.rm = TRUE))) |>
+  mutate(value = 'Average', .before = 1)
+
+num_activations_dist |>
+  mutate(value = as.character(value)) |>
+  bind_rows(num_activations_average) |>
+  view()
+
+# Total number of activations
+
+tot_activations <- function(data, data_label = rlang::caller_arg(data)) {
+  data |>
+    sum() |>
+    rlang::set_names({{ data_label }})
+}
+
+
+# Total activations (frequency) by threshold
+list(
+  tot_activations(top_1),
+  tot_activations(top_2),
+  tot_activations(top_3),
+  tot_activations(top_1_none),
+  tot_activations(top_2_none),
+  tot_activations(top_3_none),
+  tot_activations(beat_none_by_2_factor),
+  tot_activations(beat_none_by_3_factor),
+  tot_activations(beat_none_by_4_factor),
+  tot_activations(beat_none_by_9_factor),
+  tot_activations(beat_none_by_9_factor_above_0),
+  tot_activations(beat_none_by_9_factor_max_8),
+  tot_activations(beat_none_by_99_factor),
+  tot_activations(beat_none_by_99_factor_above_0),
+  tot_activations(beats_avg_by_2),
+  tot_activations(beats_avg_by_3),
+  tot_activations(beats_avg_by_4),
+  tot_activations(beats_avg_by_9),
+  tot_activations(beats_avg_by_20),
+  tot_activations(beats_avg_by_99),
+  tot_activations(beats_comb_50),
+  tot_activations(beats_comb_75),
+  tot_activations(beats_comb_80),
+  tot_activations(beats_comb_90),
+  tot_activations(avg_pshare_15),
+  tot_activations(avg_pshare_10),
+  tot_activations(avg_pshare_07),
+  tot_activations(avg_pshare_50a),
+  tot_activations(avg_pshare_25a),
+  tot_activations(avg_pshare_15a),
+  tot_activations(avg_pshare_10a)
+
+  # tot_activations(above_0),
+  # tot_activations(above_0_and_none),
+  # tot_activations(above_1_and_none),
+  # tot_activations(above_2_and_none),
+  # tot_activations(above_3_and_none),
+  # tot_activations(above_1_and_none_max_5),
+  # tot_activations(above_2_and_none_max_5),
+  # tot_activations(above_3_and_none_max_5),
+  # tot_activations(above_1_and_none_max_8),
+  # tot_activations(above_2_and_none_max_8),
+  # tot_activations(above_3_and_none_max_8)
+) |>
+  list_c() |>
+  as_tibble_row() |>
+  pivot_longer(everything()) |>
+  arrange(desc(value)) |>
+  mutate(
+    avg_per_respondent = value / 5006,
+    avg_activations_overall = avg_per_respondent / 17
+  ) |>
+  print(n = Inf)
+
+
+turf_reach_bounds <- function(k, avg_prob) {
+  stopifnot(avg_prob >= 0, avg_prob <= 1)
+  tibble(
+    k = k,
+    avg_prob = avg_prob,
+    uncorrelated_reach = 1 - (1 - avg_prob)^k,
+    max_reach = pmin(1, k * avg_prob)
+  )
+}
+
+turf_reach_bounds(5, 0.656)
+
+
+utility_df |>
+  freq(stat = 'summary') |>
+  select(product = variable, stat, value = result) |>
+  pivot_wider(names_from = stat, values_from = value) |>
+  arrange(desc(median))
+
+df |>
+  as_tibble() |>
+  select(-ID) |>
+  freq(stat = 'summary') |>
+  select(product = variable, stat, value = result) |>
+  pivot_wider(names_from = stat, values_from = value) |>
+  arrange(desc(median)) |>
+  print(n = Inf)
+
+.Last.value |> _$q75 |> mean()
+
+# turf() --------------------------------------------------------------------
+
+### Run turf on all our activation matricies ----
+top_1_results <- turf(top_1, cols_bench, 8, 2, 20, 20)
+top_2_results <- turf(top_2, cols_bench, 8, 2, 20, 20)
+top_3_results <- turf(top_3, cols_bench, 8, 2, 20, 20)
+top_1_none_results <- turf(top_1_none, cols_bench, 8, 2, 20, 20)
+top_2_none_results <- turf(top_2_none, cols_bench, 8, 2, 20, 20)
+top_3_none_results <- turf(top_3_none, cols_bench, 8, 2, 20, 20)
+above_0_results <- turf(above_0, cols_bench, 8, 2, 20, 20)
+above_0_and_none_results <- turf(above_0_and_none, cols_bench, 8, 2, 20, 20)
+above_1_and_none_results <- turf(above_1_and_none, cols_bench, 8, 2, 20, 20)
+above_2_and_none_results <- turf(above_2_and_none, cols_bench, 8, 2, 20, 20)
+above_3_and_none_results <- turf(above_3_and_none, cols_bench, 8, 2, 20, 20)
+above_1_and_none_max_5_results <- turf(
+  above_1_and_none_max_5,
+  cols_bench,
+  8,
+  2,
+  20,
+  20
+)
+above_2_and_none_max_5_results <- turf(
+  above_2_and_none_max_5,
+  cols_bench,
+  8,
+  2,
+  20,
+  20
+)
+above_3_and_none_max_5_results <- turf(
+  above_3_and_none_max_5,
+  cols_bench,
+  8,
+  2,
+  20,
+  20
+)
+above_1_and_none_max_8_results <- turf(
+  above_1_and_none_max_8,
+  cols_bench,
+  8,
+  2,
+  20,
+  20
+)
+above_2_and_none_max_8_results <- turf(
+  above_2_and_none_max_8,
+  cols_bench,
+  8,
+  2,
+  20,
+  20
+)
+above_3_and_none_max_8_results <- turf(
+  above_3_and_none_max_8,
+  cols_bench,
+  8,
+  2,
+  20,
+  20
+)
+
+results <- bind_rows(
+  lst(
+    top_1_results,
+    top_2_results,
+    top_3_results,
+    top_1_none_results,
+    top_2_none_results,
+    top_3_none_results,
+    above_0_results,
+    above_0_and_none_results,
+    above_1_and_none_results,
+    above_2_and_none_results,
+    above_3_and_none_results,
+    above_1_and_none_max_5_results,
+    above_2_and_none_max_5_results,
+    above_3_and_none_max_5_results,
+    above_1_and_none_max_8_results,
+    above_2_and_none_max_8_results,
+    above_3_and_none_max_8_results
+  ),
+  .id = 'dataset'
+)
+
+### Diagnostics and comparisons ----
+
+# Total Reach
+results |>
+  select(dataset, rank, total_reach) |>
+  pivot_wider(names_from = dataset, values_from = total_reach)
+
+
+# Total Frequency
+results |>
+  select(dataset, rank, total_frequency) |>
+  pivot_wider(names_from = dataset, values_from = total_frequency)
+
+ordering <- top_1 |>
+  freq() |>
+  filter(value == 1) |>
+  arrange(desc(n)) |>
+  pull(variable)
+
+top_ranked_products <- results |>
+  mutate(products = map(products, ~ .x[order(match(.x, ordering))])) |>
+  unnest_wider(products, '_') |>
+  filter(rank == 1)
+
+top_ranked_products |> view()
+
+top_ranked_products |>
+  select(stem('products')) |>
+  pivot_longer(everything()) |>
+  freq(value, digits = 3) |>
+  arrange(desc(n)) |>
+  mutate(result = result * 800, of = 17L) |>
+  select(product = label, found = n, of, result)
+
+
+# Old stuff -----
 result <- bench::mark(
   split_4 = turf(top_1, cols_bench, 8, 4, 20, 20),
   split_3 = turf(top_1, cols_bench, 8, 3, 20, 20),

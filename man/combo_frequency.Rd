@@ -2,18 +2,24 @@
 % Please edit documentation in R/activations.R
 \name{combo_frequency}
 \alias{combo_frequency}
-\title{Get frequency of activation}
+\title{Count a combination's total activations}
 \usage{
 combo_frequency(df, products)
 }
 \arguments{
-\item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
+\item{df}{A data frame or matrix of activations, with one row per respondent
+and one column per product.}
 
-\item{products}{A Character vector of product names that correspond to column names in the activation dataframe}
+\item{products}{A character vector of products (column names of \code{df}).}
 }
 \value{
-Integer - the total frequency
+A single number: the total frequency.
 }
 \description{
-Returns total frequency (total number of activations)
+Frequency is the total number of activations across a combination's
+products. Unlike reach, a respondent activated by several products counts
+once for each.
+}
+\examples{
+combo_frequency(am, c("northwind", "may"))
 }

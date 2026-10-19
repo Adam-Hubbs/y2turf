@@ -2,19 +2,27 @@
 % Please edit documentation in R/activations.R
 \name{marginal_activations}
 \alias{marginal_activations}
-\title{Get the marginal activations of a combination}
+\title{Count the respondents reached}
 \usage{
 marginal_activations(vec)
 }
 \arguments{
-\item{vec}{The vector of unique activations producted by \code{\link[=get_activations]{get_activations()}}.}
+\item{vec}{A logical vector from \code{\link[=get_activations]{get_activations()}}.}
 }
 \value{
-A positive integer representing the number of unique activations across everybody.
-
-Most often, this function is used on an activation dataframe that has been filtered to only contain non-activations of previous fixed combinations.
-In that case it represents the marginal activations of the new combination.
+A single integer: the number of respondents reached.
 }
 \description{
-Get the marginal activations of a combination
+Counts the respondents marked as reached by \code{\link[=get_activations]{get_activations()}}. On the full
+data this is a combination's reach. On data limited to respondents not
+already reached by some other products, it is the combination's marginal
+reach: how many new respondents it adds.
+}
+\examples{
+# Reach of a combination
+marginal_activations(get_activations(am, c("northwind", "may")))
+
+# Respondents "may" adds beyond those "northwind" already reaches
+not_reached <- am[!get_activations(am, "northwind"), ]
+marginal_activations(get_activations(not_reached, "may"))
 }

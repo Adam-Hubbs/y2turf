@@ -1,0 +1,38 @@
+CARGO_VERSION="$(cargo --version)"
+
+if [ $? -ne 0 ]; then
+  echo "-------------- ERROR: CONFIGURATION FAILED --------------------"
+  echo ""
+  echo "The cargo command is not available. To install Rust, please refer"
+  echo "to the official instruction:"
+  echo ""
+  echo "https://www.rust-lang.org/tools/install"
+  echo ""
+  echo "---------------------------------------------------------------"
+
+  exit 1
+fi
+
+# There's a little chance that rustc is not available on PATH while cargo is.
+# So, just ignore the error case.
+RUSTC_VERSION="$(rustc --version || true)"
+
+# Report the version of Rustc to comply with the CRAN policy
+echo "using Rust package manager: '${CARGO_VERSION}'"
+echo "using Rust compiler: '${RUSTC_VERSION}'"
+
+# Always build release, even under pkgbuild::compile_dll() (which sets
+# DEBUG=true), so load_all() timings reflect real performance. Set
+# SAVVY_PROFILE=dev for a debug build.
+PROFILE="${SAVVY_PROFILE:-release}"
+
+# e.g. SAVVY_FEATURES="a b"  -->  "--features 'a b'"
+if [ -n "${SAVVY_FEATURES}" ]; then
+  FEATURE_FLAGS="--features '${SAVVY_FEATURES}'"
+fi
+
+sed \
+  -e "s/@TARGET@/x86_64-pc-windows-gnu/" \
+  -e "s/@PROFILE@/${PROFILE}/" \
+  -e "s/@FEATURE_FLAGS@/${FEATURE_FLAGS}/" \
+  src/Makevars.win.in > src/Makevars.win

@@ -17,27 +17,301 @@ turf(
 )
 }
 \arguments{
-\item{df}{The activation dataframe. Columns must be the names of possible products. Rows indicate individual respondents. For now each cell must be either a 0 or a 1.}
+\item{df}{A data frame of activations, with one row per respondent and one
+column per product. Columns named in \code{possible_products} must contain only
+\code{0} and \code{1}. Other columns are ignored.}
 
-\item{possible_products}{The universe of possible products we are testing. Given as a character vector.}
+\item{possible_products}{A character vector of the products (column names of
+\code{df}) to choose from.}
 
-\item{num_products}{The number of products to be included in our competetive set. A positive integer.}
+\item{num_products}{The number of products in each combination. A positive
+integer no greater than \code{length(possible_products)}.}
 
-\item{batch_size}{The number of products to solve for at a given time. A positive integer. Note: We may override this in order to make sure we hit num_return.}
+\item{batch_size}{The number of products each batch adds. A positive
+integer. The final batch may be enlarged to make sure \code{num_return}
+combinations can be returned.}
 
-\item{keep_n_at_batch}{The number of solutions from each batch that we do the swapping step on. A positive integer.}
+\item{keep_n_at_batch}{The number of combinations each batch keeps; these
+seed the swap search. A positive integer. The final batch keeps at least
+\code{num_return}.}
 
-\item{num_return}{The n-best solutions to return from turf(). A positive integer.}
+\item{num_return}{The number of combinations to return. A positive integer.}
 
-\item{show_combinations}{Whether to show the number of combinations searched or not. A boolean.}
+\item{show_combinations}{Whether to report how many combinations were
+searched, and attach the counts to the result as attributes. A boolean.}
 
-\item{use_swaps}{Whether to augment the main algorithm with swapping after each batch_size. A boolean.}
+\item{use_swaps}{Whether to refine every batch after the first with a swap
+search. A boolean.}
 
-\item{swap_top_n}{The number of combinations the swap algorithm continues each step on until they no longer change. A positive integer.}
+\item{swap_top_n}{The number of combinations the swap search keeps (and
+swaps from) each round. A positive integer. The final swap search keeps
+at least \code{num_return}.}
 }
 \value{
-A dataframe with the combinations and corresponding reach
+A tibble with one row per combination, best first, and columns:
+\itemize{
+\item \code{rank}: integer rank, starting at 1.
+\item \code{products}: a list of character vectors, each holding a combination's
+products in descending order of individual reach.
+\item \code{total_reach}: the number of respondents reached by the combination.
+\item \code{total_frequency}: the total number of activations across the
+combination's products.
+}
+
+When \code{show_combinations = TRUE}, the attributes \code{n_combinations},
+\code{n_regular_combinations}, and \code{n_swap_combinations} hold the number of
+combinations scored in total, by batches, and by swaps.
 }
 \description{
-Runs a TURF analysis with an efficient algorithm that only checks combinations that are plausibly correct.
+TURF (total unduplicated reach and frequency) analysis looks for the
+combination of \code{num_products} products that reaches the most respondents,
+where a respondent is reached if they are activated by (would choose) at
+least one product in the combination. \code{turf()} returns the best
+\code{num_return} combinations.
+
+Scoring every combination quickly becomes infeasible: 53 products have
+886 million combinations of 8. Instead, \code{turf()} builds combinations up in
+batches and repairs them with a local swap search, scoring only a small
+fraction of all combinations. This usually finds the best combination, but
+unless \code{batch_size = num_products} it is not guaranteed to. The sections
+below explain each step.
+}
+\section{Reach and frequency}{
+A combination's \emph{reach} is the number of respondents activated by at least
+one of its products. Its \emph{frequency} is its total number of activations, so
+a respondent activated by two of its products counts twice:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{                 respondent   1 2 3 4 5 6
+  product A                   1 1 0 0 0 0
+  product B                   0 1 1 1 0 0
+  \{A, B\} reaches              x x x x . .    reach 4, frequency 5
+}\if{html}{\out{</div>}}
+
+Given products already chosen, a candidate's \emph{marginal reach} is the number
+of respondents it reaches that the chosen products don't. Above, B's
+marginal reach given A is 2 (respondents 3 and 4).
+}
+
+\section{Overview}{
+\if{html}{\out{<div class="sourceCode">}}\preformatted{  put products in order of individual reach
+                      |
+                      v
+  plan batch sizes          e.g. 7 products in batches of 3: 3, 3, 1
+                      |
+                      v
+  +-- for each batch ------------------------------------------+
+  |  1. score every way of adding `size` products to the fixed |
+  |     set F by marginal reach, and keep the best             |
+  |     `keep_n_at_batch`                                      |
+  |  2. complete each kept combination with F                  |
+  |  3. after the first batch, if `use_swaps`: swap search     |
+  |  4. fix the best combination as F for the next batch       |
+  +------------------------------------------------------------+
+                      |
+                      v
+  return the final batch's best `num_return` combinations
+}\if{html}{\out{</div>}}
+}
+
+\section{Planning batches}{
+The \code{num_products} products are found in batches of \code{batch_size}, with the
+final batch taking the remainder. Each batch chooses only among products
+not chosen yet:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{  53 products, num_products = 7, batch_size = 3
+
+  batch 1:  best 3 of 53                          F = \{a, b, c\}
+  batch 2:  best 3 of the other 50, given F       F = \{a, b, c, d, e, f\}
+  batch 3:  best 1 of the other 47, given F       -> results
+}\if{html}{\out{</div>}}
+
+The final batch must be able to produce \code{num_return} distinct combinations.
+If it can't, it is combined with the batch before it (repeatedly, if
+needed), with a warning. For example, 5 products in batches of 2 would be
+batches of 2, 2, and 1, but the final batch has only 49 products to choose
+from. With \code{num_return = 60}, the last two batches are combined into one of
+3, which has \code{choose(51, 3)} = 20,825 candidates, giving batches of 2 and 3.
+}
+
+\section{Scoring a batch}{
+Respondents already reached by the fixed set F can't add to any
+candidate's reach, so they are set aside and candidates are scored by
+marginal reach among the rest:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{             respondent   1 2 3 4 5 6 7 8 9 10
+  F = \{A\}                 x x x x x x . . . .
+  still to reach                      7 8 9 10
+
+  add B                   1 1 1 0 0 0 1 1 0 0    +2  (7, 8)
+  add C                   0 0 0 1 1 1 0 0 1 1    +2  (9, 10)
+  add D                   1 0 0 0 0 0 0 0 0 0    +0
+}\if{html}{\out{</div>}}
+
+Every combination of \code{size} remaining products is scored; nothing is
+pruned. The best \code{keep_n_at_batch} (at least \code{num_return} in the final
+batch) are kept and completed with F. Every candidate shares F, so ranking
+them by marginal reach is the same as ranking them by total reach.
+
+Without swaps, each batch is a greedy step: it commits to the best
+\code{batch_size} products given what was already chosen, and never revisits
+that choice.
+}
+
+\section{Swap search}{
+Greedy steps can lock in an early choice that turns out to be poor. With
+batches of 1:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{             respondent   1 2 3 4 5 6 7 8 9 10    reach
+  A                       1 1 1 1 1 1 0 0 0 0       6
+  B                       1 1 1 0 0 0 1 1 0 0       5
+  C                       0 0 0 1 1 1 0 0 1 1       5
+
+  batch 1 picks A (best alone); batch 2 adds B or C     -> 8
+  swapping A for C turns \{A, B\} into \{B, C\}             -> 10
+}\if{html}{\out{</div>}}
+
+So when \code{use_swaps = TRUE}, every batch after the first is followed by a
+swap search over complete combinations, starting from the batch's kept
+combinations. Each round generates every combination one swap away from a
+kept combination: any one product, including products fixed by earlier
+batches, is replaced with any product not in the combination.
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{  products A, B, C, D; kept combination \{A, B\}
+
+  swap out A:   \{C, B\}   \{D, B\}
+  swap out B:   \{A, C\}   \{A, D\}
+}\if{html}{\out{</div>}}
+
+These swaps are pooled with the kept combinations themselves, and the best
+\code{swap_top_n} (at least \code{num_return} in the final batch) are kept for the
+next round:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{  round 1:   K1  ->  K1 + every swap of K1  ->  best swap_top_n  =  K2
+  round 2:   K2  ->  K2 + every swap of K2  ->  best swap_top_n  =  K3
+  ...
+  stop when a round keeps what it started with (K3 = K2)
+}\if{html}{\out{</div>}}
+
+Since the kept combinations are always in the pool, results never get
+worse from one round to the next. When the search stops, no swap of any
+kept combination beats the worst of them; in particular, no single swap
+improves the best combination. The search gives up after 50 rounds, with a
+warning, and returns the best combinations found so far.
+
+The first batch is never followed by a swap search: it already scored every
+combination of its size, and a swap only produces another combination of
+the same size.
+}
+
+\section{Ranking and ties}{
+Combinations are ranked by total reach, then by total frequency. Any
+remaining ties go to the combination whose products have higher individual
+reach. Products are put in order of individual reach (ties broken by their
+order in \code{possible_products}), and tied combinations are compared product
+by product in that order. Each returned combination lists its products in
+this order. Within a batch, candidates are ranked the same way, using
+marginal rather than total reach and frequency.
+}
+
+\section{Combinations searched}{
+With \code{show_combinations = TRUE}, \code{turf()} reports how many combinations it
+scored. \emph{Regular} combinations are those scored by batches: for each batch,
+\verb{choose(remaining products, batch size)}. \emph{Swap} combinations are those
+generated by swap searches, with duplicates removed within each round but
+not across rounds.
+}
+
+\section{Choosing the arguments}{
+\itemize{
+\item \code{batch_size} matters most. Larger batches look further ahead, so they
+are less likely to lock in a poor choice, and \code{batch_size = num_products}
+scores every combination, guaranteeing the best result. But the cost grows
+very fast: each batch scores \verb{choose(remaining products, batch_size)}
+combinations (see below).
+\item \code{use_swaps} repairs poor choices made by earlier batches, usually at
+small cost.
+\item \code{keep_n_at_batch} gives the swap search more starting points, at small
+cost.
+\item \code{swap_top_n} widens the swap search, so it explores more alternatives
+before stopping. Each round scores about \code{swap_top_n * k * (n - k)}
+combinations of \code{k} of \code{n} products.
+}
+
+Combinations of each size among 53 products:\tabular{rr}{
+   Size \tab Combinations \cr
+   1 \tab 53 \cr
+   2 \tab 1,378 \cr
+   3 \tab 23,426 \cr
+   4 \tab 292,825 \cr
+   5 \tab 2,869,685 \cr
+   6 \tab 22,957,480 \cr
+   8 \tab 886,322,710 \cr
+}
+
+
+A practical approach is to start with small batches and swaps, then check
+whether larger batches (or a larger \code{swap_top_n}) change the result.
+}
+
+\section{Implementation}{
+The search runs in Rust, and relies on three ideas.
+
+\strong{Respondents as bits.} Each product is stored as a bitset with one bit
+per respondent, 64 respondents to a machine word. A combination's reach is
+the number of set bits in the OR of its products' bitsets, and its
+frequency is the sum of per-product counts computed once up front:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{  respondent   1 2 3 4 5 6 7 8
+  A            1 1 1 1 1 1 0 0
+  B            1 1 1 0 0 0 1 1
+  A OR B       1 1 1 1 1 1 1 1     set bits = reach = 8
+}\if{html}{\out{</div>}}
+
+For a batch, the bitsets cover only respondents not reached by F, so set
+bits count marginal reach directly, and the bitsets shrink as F grows.
+
+\strong{Shared work.} A batch's combinations are visited depth first, in
+lexicographic order, carrying the OR of the products chosen so far. The OR
+for \verb{\{a, b\}} is computed once and shared by every \verb{\{a, b, ...\}} below it,
+so each combination costs a single OR and count, whatever its size:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{  \{a\} --+-- \{a, b\} --+-- \{a, b, c\}
+        |            +-- \{a, b, d\}
+        |            +-- \{a, b, e\}
+        +-- \{a, c\} --+-- \{a, c, d\}
+        |            +-- \{a, c, e\}
+        +-- \{a, d\} ----- \{a, d, e\}
+  \{b\} --+-- \{b, c\} --+-- \{b, c, d\}
+  ...
+}\if{html}{\out{</div>}}
+
+\strong{Bounded memory.} Combinations are never stored in bulk. Each one is
+scored as it is visited, and only the best are kept, in a fixed-size heap.
+The work is split across threads by first product, and swaps are also
+scored in parallel.
+}
+
+\examples{
+turf(
+  am,
+  colnames(am),
+  num_products = 4,
+  batch_size = 2,
+  keep_n_at_batch = 10,
+  num_return = 3
+)
+
+# One batch of every product scores every combination: exact, but the
+# number of combinations grows very quickly with `num_products`
+turf(
+  am,
+  colnames(am),
+  num_products = 3,
+  batch_size = 3,
+  keep_n_at_batch = 10,
+  num_return = 3
+)
+}
+\seealso{
+\code{\link[=run_batch]{run_batch()}} to run a single batch.
 }

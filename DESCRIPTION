@@ -1,9 +1,12 @@
 Package: y2turf
 Title: Efficient Algorithms for TURF Analysis
-Version: 0.0.0.9000
+Version: 0.0.1
 Authors@R: 
     person("Adam", "Hubbs", , "adam@y2analytics.com", role = c("aut", "cre"))
-Description: Efficient Algorithms for TURF Analysis.
+Description: Fast TURF (total unduplicated reach and frequency) analysis.
+    Finds the combinations of products that reach the most respondents by
+    building them up in batches, refined with swap searches, rather than
+    scoring every possible combination. The search is implemented in Rust.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -11,14 +14,14 @@ Depends:
   R (>= 4.3.0)
 Imports:
   cli,
-  purrr,
   rlang,
   tibble
 Suggests: 
     testthat (>= 3.0.0),
-    dplyr
+    withr
 Config/testthat/edition: 3
 Config/roxygen2/version: 8.1.0
 Config/testthat/parallel: true
 Config/testthat/start-first: *test-turf*
 LazyData: true
+SystemRequirements: Cargo (Rust's package manager), rustc
