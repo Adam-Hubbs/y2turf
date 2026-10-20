@@ -2,6 +2,7 @@ TARGET = @TARGET@
 
 PROFILE = @PROFILE@
 FEATURE_FLAGS = @FEATURE_FLAGS@
+VENDOR_ARGS = @VENDOR_ARGS@
 
 # Add flags if necessary
 RUSTFLAGS = 
@@ -30,12 +31,12 @@ $(STATLIB):
 	  export CC="$(CC)" && \
 	  export CFLAGS="$(CFLAGS)" && \
 	  export RUSTFLAGS="$(RUSTFLAGS)" && \
-	  cargo build --target $(TARGET) --lib --profile $(PROFILE) $(FEATURE_FLAGS) --manifest-path ./rust/Cargo.toml --target-dir $(TARGET_DIR)
+	  cargo build --target $(TARGET) --lib --profile $(PROFILE) $(FEATURE_FLAGS) $(VENDOR_ARGS) --manifest-path ./rust/Cargo.toml --target-dir $(TARGET_DIR)
 
 clean_intermediate: $(SHLIB)
 	rm -f $(STATLIB)
 
 clean:
-	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB) ./rust/target
+	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB) ./rust/target ./rust/vendor
 
 .PHONY: all clean_intermediate clean

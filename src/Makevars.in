@@ -2,6 +2,7 @@ TARGET = @TARGET@
 
 PROFILE = @PROFILE@
 FEATURE_FLAGS = @FEATURE_FLAGS@
+VENDOR_ARGS = @VENDOR_ARGS@
 
 # Add flags if necessary
 RUSTFLAGS =
@@ -11,7 +12,7 @@ LIBDIR = $(TARGET_DIR)/$(TARGET)/$(subst dev,debug,$(PROFILE))
 STATLIB = $(LIBDIR)/liby2turf.a
 PKG_LIBS = -L$(LIBDIR) -ly2turf
 
-CARGO_BUILD_ARGS = --lib --profile $(PROFILE) $(FEATURE_FLAGS) --manifest-path=./rust/Cargo.toml --target-dir $(TARGET_DIR)
+CARGO_BUILD_ARGS = --lib --profile $(PROFILE) $(FEATURE_FLAGS) $(VENDOR_ARGS) --manifest-path=./rust/Cargo.toml --target-dir $(TARGET_DIR)
 
 all: $(SHLIB) clean_intermediate
 
@@ -39,6 +40,6 @@ clean_intermediate: $(SHLIB)
 	rm -f $(STATLIB)
 
 clean:
-	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB) ./rust/target
+	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB) ./rust/target ./rust/vendor
 
 .PHONY: all clean_intermediate clean

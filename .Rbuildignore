@@ -13,3 +13,6 @@
 ^src/Makevars\.win$
 ^benchmarks\.R$
 ^profiling\.R$
+^src/rust/vendor$
+^docs$
+^_pkgdown\.yml$
