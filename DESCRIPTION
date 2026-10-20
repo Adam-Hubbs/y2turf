@@ -24,4 +24,6 @@ Config/roxygen2/version: 8.1.0
 Config/testthat/parallel: true
 Config/testthat/start-first: *test-turf*
 LazyData: true
+URL: https://adam-hubbs.github.io/y2turf/, https://github.com/Adam-Hubbs/y2turf
+BugReports: https://github.com/Adam-Hubbs/y2turf/issues
 SystemRequirements: Cargo (Rust's package manager), rustc
