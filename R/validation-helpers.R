@@ -59,6 +59,46 @@ validate_turf_args <- function(
   invisible(NULL)
 }
 
+validate_order_args <- function(df, products, call = rlang::caller_env()) {
+  rlang::check_required(df, call = call)
+  rlang::check_required(products, call = call)
+  rlang::check_data_frame(df, call = call)
+
+  if (nrow(df) == 0) {
+    cli::cli_abort("{.arg df} must have at least one row.", call = call)
+  }
+  if (!is.character(products) || length(products) == 0) {
+    cli::cli_abort(
+      "{.arg products} must be a non-empty character vector.",
+      call = call
+    )
+  }
+  if (anyDuplicated(products) > 0) {
+    cli::cli_abort(
+      "{.arg products} must not contain duplicates: {.val {unique(products[duplicated(products)])}}.",
+      call = call
+    )
+  }
+  missing_products <- setdiff(products, colnames(df))
+  if (length(missing_products) > 0) {
+    cli::cli_abort(
+      "{.arg products} must all be columns of {.arg df}: missing {.val {missing_products}}.",
+      call = call
+    )
+  }
+
+  cell_values <- unique(unlist(df[products], use.names = FALSE))
+  invalid_values <- setdiff(cell_values, c(0, 1))
+  if (length(invalid_values) > 0) {
+    cli::cli_abort(
+      "{.arg df} columns named in {.arg products} must contain only 0s and 1s, not {.val {invalid_values}}.",
+      call = call
+    )
+  }
+
+  invisible(NULL)
+}
+
 warn_if_batches_combined <- function(
   batch_sizes,
   batch_size,
