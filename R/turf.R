@@ -355,8 +355,11 @@ turf <- function(
     n_regular <- search$n_regular
     n_swap <- search$n_swap
     n_total <- n_regular + n_swap
+    # Counts can exceed the integer range, which cli's `{?s}` pluralization
+    # can't handle, so pluralize by hand.
+    n_batches <- length(batch_sizes)
     cli::cli_inform(
-      "Searched {n_total} combination{?s}: {n_regular} regular combination{?s} and {n_swap} swap combination{?s} across {length(batch_sizes)} batch{?es}."
+      "Searched {format(n_total, big.mark = ',', scientific = FALSE)} combinations: {format(n_regular, big.mark = ',', scientific = FALSE)} regular and {format(n_swap, big.mark = ',', scientific = FALSE)} swap, across {n_batches} batch{?es}."
     )
     attr(result, "n_combinations") <- n_total
     attr(result, "n_regular_combinations") <- n_regular
