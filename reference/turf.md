@@ -325,8 +325,7 @@ turf(
   keep_n_at_batch = 10,
   num_return = 3
 )
-#> Searched 4358 combinations: 2653 regular combinations and 1705 swap
-#> combinations across 2 batches.
+#> Searched 4,358 combinations: 2,653 regular and 1,705 swap, across 2 batches.
 #> # A tibble: 3 × 4
 #>    rank products  total_reach total_frequency
 #>   <int> <list>          <int>           <dbl>
@@ -344,8 +343,7 @@ turf(
   keep_n_at_batch = 10,
   num_return = 3
 )
-#> Searched 23426 combinations: 23426 regular combinations and 0 swap combinations
-#> across 1 batch.
+#> Searched 23,426 combinations: 23,426 regular and 0 swap, across 1 batch.
 #> # A tibble: 3 × 4
 #>    rank products  total_reach total_frequency
 #>   <int> <list>          <int>           <dbl>
